@@ -1,2 +1,2 @@
 # audio-tutorial
-Tutorial for Torch Audio
+Tutorial for torchaudio
