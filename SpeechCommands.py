@@ -19,10 +19,12 @@ import torchaudio
 from torchaudio.datasets import SPEECHCOMMANDS
 from torchaudio.transforms import MFCC
 
+audio_backend = "soundfile"
 device = "cuda" if torch.cuda.is_available() else "cpu"
 
 labels = [
-        '-', '*',
+        "-",
+        "*",
         "backward",
         "bed",
         "bird",
@@ -59,25 +61,19 @@ labels = [
         "yes",
         "zero",
 ]
-
-test = "house"
 max_length = max(map(len, labels))
 vocab_size = len(labels) + 2
 
-num_features = 13
-
+# audio, self.sr, window_stride=(160, 80), fft_size=512, num_filt=20, num_coeffs=13
+n_mfcc = 13
 melkwargs = {
     'n_fft': 512,
     'n_mels': 20,
     'hop_length': 80,
 }
-
-# audio, self.sr, window_stride=(160, 80), fft_size=512, num_filt=20, num_coeffs=13
-mfcc = MFCC(sample_rate=16000, n_mfcc=num_features, melkwargs=melkwargs)
-
+sample_rate = 16000
 
 batch_size = 512  # max number of sentences per batch
-loader_train = DataLoader(train, batch_size=batch_size, collate_fn=collate_fn, shuffle=True)
 optimizer_params = {
     "lr": 1.0,
     "eps": 1e-8,
@@ -88,10 +84,8 @@ max_epoch = 10
 clip_norm = 10.
 
 
-torchaudio.set_audio_backend("soundfile")
-
-pr = cProfile.Profile()
-pr.enable()
+torchaudio.set_audio_backend(audio_backend)
+mfcc = MFCC(sample_rate=sample_rate, n_mfcc=n_mfcc, melkwargs=melkwargs)
 
 
 def build_mapping(labels):
@@ -116,12 +110,6 @@ def apply_with_padding(l, mapping, max_length, fillwith):
     l = map_with_dict(mapping, l)
     l = padding(l, max_length, mapping["*"])
     return l
-
-
-mapping = build_mapping(labels)
-
-encode = lambda l: apply_with_padding(l, mapping, max_length, mapping["*"])
-decode = lambda l: apply_with_padding(l, mapping, max_length, mapping[1])
 
 
 def process_waveform(waveform):
@@ -180,9 +168,6 @@ def datasets():
     # dataset = SPEECHCOMMANDS(root, download=download)
 
     return dataset
-
-
-train = datasets()
 
 
 def collate_fn(batch):
@@ -278,57 +263,6 @@ class Wav2Letter(nn.Module):
         return log_probs
 
 
-model = Wav2Letter(num_features, vocab_size).to(device)
-optimizer = Adadelta(model.parameters(), **optimizer_params)
-criterion = torch.nn.CTCLoss()
-
-for epoch in range(max_epoch):
-
-    for inputs, targets, _, _ in tqdm(loader_train):
-
-        inputs = inputs.to(device)
-        targets = targets.to(device)
-
-        if inputs is None or targets is None:
-            continue
-
-        outputs = model(inputs)
-
-        outputs = outputs.transpose(1, 2).transpose(0, 1)
-
-        # CTC
-        # https://pytorch.org/docs/master/nn.html#torch.nn.CTCLoss
-        # https://discuss.pytorch.org/t/ctcloss-with-warp-ctc-help/8788/3
-        mini_batch_size = len(inputs)
-
-        input_lengths = torch.full((mini_batch_size,), outputs.shape[0], dtype=torch.long, device=outputs.device)
-        target_lengths = torch.tensor([target.shape[0] for target in targets], dtype=torch.long, device=targets.device)
-
-        # print(torch.isnan(outputs).any())
-        # print(torch.isnan(targets).any())
-        # print(torch.isnan(input_lengths).any())
-        # print(torch.isnan(target_lengths).any())
-        # print(outputs.shape)
-        # print(targets.shape)
-        # print(input_lengths.shape)
-        # print(target_lengths.shape)
-
-        # outputs: input length, batch size, number of classes (including blank)
-        # targets: batch size, max target length
-        # input_lengths: batch size
-        # target_lengths: batch size
-        loss = criterion(outputs, targets, input_lengths, target_lengths)
-
-        optimizer.zero_grad()
-        loss.backward()
-        # torch.nn.utils.clip_grad_norm_(model.parameters(), clip_norm)
-        optimizer.step()
-
-        i_files += 1
-
-    print(epoch, loss)
-
-
 def GreedyDecoder(outputs):
     """Greedy Decoder. Returns highest probability of
         class labels for each timestep
@@ -344,6 +278,61 @@ def GreedyDecoder(outputs):
     return indices[:, 0, :]
 
 
+mapping = build_mapping(labels)
+
+encode = lambda l: apply_with_padding(l, mapping, max_length, mapping["*"])
+decode = lambda l: apply_with_padding(l, mapping, max_length, mapping[1])
+
+train = datasets()
+loader_train = DataLoader(train, batch_size=batch_size, collate_fn=collate_fn, shuffle=True)
+
+model = Wav2Letter(n_mfcc, vocab_size).to(device)
+optimizer = Adadelta(model.parameters(), **optimizer_params)
+criterion = torch.nn.CTCLoss()
+
+
+pr = cProfile.Profile()
+pr.enable()
+
+for epoch in range(max_epoch):
+
+    for inputs, targets, _, _ in tqdm(loader_train):
+
+        inputs = inputs.to(device)
+        targets = targets.to(device)
+        outputs = model(inputs)
+        outputs = outputs.transpose(1, 2).transpose(0, 1)
+
+        # CTC
+        # https://pytorch.org/docs/master/nn.html#torch.nn.CTCLoss
+        # https://discuss.pytorch.org/t/ctcloss-with-warp-ctc-help/8788/3
+        this_batch_size = len(inputs)
+
+        input_lengths = torch.full(
+            (this_batch_size,), outputs.shape[0], dtype=torch.long, device=outputs.device
+        )
+        target_lengths = torch.tensor(
+            [target.shape[0] for target in targets], dtype=torch.long, device=targets.device
+        )
+
+        # print(torch.isnan(outputs).any())
+        # print(torch.isnan(targets).any())
+        # print(torch.isnan(input_lengths).any())
+        # print(torch.isnan(target_lengths).any())
+
+        # outputs: input length, batch size, number of classes (including blank)
+        # targets: batch size, max target length
+        # input_lengths: batch size
+        # target_lengths: batch size
+        loss = criterion(outputs, targets, input_lengths, target_lengths)
+
+        optimizer.zero_grad()
+        loss.backward()
+        # torch.nn.utils.clip_grad_norm_(model.parameters(), clip_norm)
+        optimizer.step()
+
+    print(epoch, loss)
+
 sample = inputs[0].unsqueeze(0).to(device)
 target = targets[0].to(device)
 
@@ -357,7 +346,6 @@ greedy_output = GreedyDecoder(output)
 print(greedy_output.shape)
 print(greedy_output)
 print(decode(greedy_output.tolist()[0]))
-
 
 pr.disable()
 s = StringIO.StringIO()
