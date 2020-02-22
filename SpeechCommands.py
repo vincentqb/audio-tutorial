@@ -7,7 +7,6 @@ import collections
 import cProfile
 import pstats
 from io import StringIO
-from random import randint
 
 import torch
 from torch import nn, topk
@@ -124,7 +123,8 @@ class PROCESSED_SPEECHCOMMANDS(SPEECHCOMMANDS):
     def __getitem__(self, n):
         return self._process(super().__getitem__(n))
 
-    def _process(self, item):
+    @staticmethod
+    def _process(item):
         # waveform, sample_rate, label, speaker_id, utterance_number
         waveform = process_waveform(item[0])
         label = process_target(item[2])
@@ -274,7 +274,7 @@ def GreedyDecoder(outputs):
     Returns:
         torch.Tensor: class labels per time step.
     """
-    _, indices = topk(ctc_matrix, k=1, dim=1)
+    _, indices = topk(outputs, k=1, dim=1)
     return indices[:, 0, :]
 
 
@@ -333,6 +333,7 @@ for epoch in range(max_epoch):
 
     print(epoch, loss)
 
+# inputs, targets, _, _ = next(loader_train)
 sample = inputs[0].unsqueeze(0).to(device)
 target = targets[0].to(device)
 
