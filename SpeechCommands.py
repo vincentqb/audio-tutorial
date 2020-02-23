@@ -102,41 +102,29 @@ def build_mapping(labels):
     return {**d1, **d2}
 
 
-def padding(l, max_length, fillwith):
-    return l  + [fillwith] * (max_length-len(l))
-
-
-def map_with_dict(mapping, l):
-    return [mapping[t] for t in l]
-
-
-def apply_with_padding(l, mapping, max_length, fillwith):
-    l = map_with_dict(mapping, l)
-    l = padding(l, max_length, mapping["*"])
+def map_and_pad(l, mapping, max_length, fillwith):
+    if hasattr(l, "tolist"):
+        l = l.tolist()
+    l = [mapping[t] for t in l]  # map with dict
+    l += [fillwith] * (max_length-len(l))  # add padding
     return l
 
 
-def process_waveform(waveform):
+def process_datapoint(item):
+    waveform = item[0]
+    target = item[2]
     # pick first channel, apply mfcc, tranpose for pad_sequence
-    return mfcc(waveform)[0, ...].transpose(0, -1)
-
-def process_target(target):
-    return torch.tensor(encode(target), dtype=torch.long, device=device)
+    specgram = mfcc(waveform)[0, ...].transpose(0, -1)
+    target =  torch.tensor(encode(target), dtype=torch.long, device=device)
+    return specgram, target
 
 
 class PROCESSED_SPEECHCOMMANDS(SPEECHCOMMANDS):
     def __getitem__(self, n):
-        return self._process(super().__getitem__(n))
-
-    @staticmethod
-    def _process(item):
-        # waveform, sample_rate, label, speaker_id, utterance_number
-        waveform = process_waveform(item[0])
-        label = process_target(item[2])
-        return waveform, label
+        return process_datapoint(super().__getitem__(n))
 
     def __next__(self):
-        return self._process(super().__next__())
+        return process_datapoint(super().__next__())
 
 
 class MemoryCache(torch.utils.data.Dataset):
@@ -163,12 +151,9 @@ class MemoryCache(torch.utils.data.Dataset):
 
 
 def datasets():
-    # waveform, sample_rate, label, speaker_id, utterance_number
-
-    download = True
     root = "./"
 
-    dataset = PROCESSED_SPEECHCOMMANDS(root, download=download)
+    dataset = PROCESSED_SPEECHCOMMANDS(root, download=True)
     if bg_maxsize > 0:
         dataset = torchaudio.data.utils.bg_iterator(dataset, bg_maxsize)
     dataset = MemoryCache(dataset)
@@ -198,6 +183,7 @@ def collate_fn(batch):
     targets = torch.nn.utils.rnn.pad_sequence(targets, batch_first=True)
     tensors = torch.nn.utils.rnn.pad_sequence(tensors, batch_first=True)
     tensors = tensors.transpose(1, -1)
+
     return tensors, targets, input_lengths, target_lengths
 
 
@@ -212,11 +198,9 @@ class PrintLayer(nn.Module):
 
 class Wav2Letter(nn.Module):
     """Wav2Letter Speech Recognition model
-        Architecture is based off of Facebooks AI Research paper
         https://arxiv.org/pdf/1609.03193.pdf
-        This specific architecture accepts mfcc or
-        power spectrums speech signals
-        TODO: use cuda if available
+        This specific architecture accepts mfcc or power spectrums speech signals
+
         Args:
             num_features (int): number of mfcc features
             num_classes (int): number of unique grapheme class labels
@@ -256,10 +240,9 @@ class Wav2Letter(nn.Module):
             takes log probability of output
         Args:
             batch (int): mini batch of data
-             shape (batch, num_features, frame_len)
+            shape (batch, num_features, frame_len)
         Returns:
-            log_probs (torch.Tensor):
-                shape  (batch_size, num_classes, output_len)
+            Tensor with shape (batch_size, num_classes, output_len)
         """
         # y_pred shape (batch_size, num_classes, output_len)
         y_pred = self.layers(batch)
@@ -271,12 +254,10 @@ class Wav2Letter(nn.Module):
 
 
 def GreedyDecoder(outputs):
-    """Greedy Decoder. Returns highest probability of
-        class labels for each timestep
+    """Greedy Decoder. Returns highest probability of class labels for each timestep
 
     Args:
-        outputs (torch.Tensor):
-            shape (1, num_classes, output_len)
+        outputs (torch.Tensor): shape (1, num_classes, output_len)
 
     Returns:
         torch.Tensor: class labels per time step.
@@ -287,8 +268,8 @@ def GreedyDecoder(outputs):
 
 mapping = build_mapping(labels)
 
-encode = lambda l: apply_with_padding(l, mapping, max_length, mapping["*"])
-decode = lambda l: apply_with_padding(l, mapping, max_length, mapping[1])
+encode = lambda l: map_and_pad(l, mapping, max_length, mapping["*"])
+decode = lambda l: map_and_pad(l, mapping, max_length, mapping[1])
 
 train = datasets()
 loader_train = DataLoader(
@@ -304,6 +285,8 @@ criterion = torch.nn.CTCLoss()
 pr = cProfile.Profile()
 pr.enable()
 
+best_loss = 1.
+
 for epoch in range(max_epoch):
 
     for inputs, targets, _, _ in tqdm(loader_train):
@@ -313,9 +296,6 @@ for epoch in range(max_epoch):
         outputs = model(inputs)
         outputs = outputs.transpose(1, 2).transpose(0, 1)
 
-        # CTC
-        # https://pytorch.org/docs/master/nn.html#torch.nn.CTCLoss
-        # https://discuss.pytorch.org/t/ctcloss-with-warp-ctc-help/8788/3
         this_batch_size = len(inputs)
 
         input_lengths = torch.full(
@@ -325,11 +305,9 @@ for epoch in range(max_epoch):
             [target.shape[0] for target in targets], dtype=torch.long, device=targets.device
         )
 
-        # print(torch.isnan(outputs).any())
-        # print(torch.isnan(targets).any())
-        # print(torch.isnan(input_lengths).any())
-        # print(torch.isnan(target_lengths).any())
-
+        # CTC
+        # https://pytorch.org/docs/master/nn.html#torch.nn.CTCLoss
+        # https://discuss.pytorch.org/t/ctcloss-with-warp-ctc-help/8788/3
         # outputs: input length, batch size, number of classes (including blank)
         # targets: batch size, max target length
         # input_lengths: batch size
@@ -338,31 +316,37 @@ for epoch in range(max_epoch):
 
         optimizer.zero_grad()
         loss.backward()
-        # torch.nn.utils.clip_grad_norm_(model.parameters(), clip_norm)
+        torch.nn.utils.clip_grad_norm_(model.parameters(), clip_norm)
         optimizer.step()
 
     print(epoch, loss)
 
+    if (loss < best_loss).all():
+        # Save model
+        dt = datetime.now().strftime("%y%m%d.%H%M%S")
+        torch.save(model.state_dict(), f"./model.{epoch}.{dt}.ph")
 
+
+# Save model
 dt = datetime.now().strftime("%y%m%d.%H%M%S")
 torch.save(model.state_dict(), f"./model.{epoch}.{dt}.ph")
 
+# Switch to evaluation mode
 model.eval()
 
 sample = inputs[0].unsqueeze(0).to(device, non_blocking=non_blocking)
 target = targets[0].to(device, non_blocking=non_blocking)
 
-print(decode(targets[0].tolist()))
+print(targets[0[)
+print(decode(targets[0]))
 
 output = model(sample)
-print(output.shape)
+output = GreedyDecoder(output)
 
-greedy_output = GreedyDecoder(output)
+print(output)
+print(decode(greedy_output))
 
-print(greedy_output.shape)
-print(greedy_output)
-print(decode(greedy_output.tolist()[0]))
-
+# Print performance
 pr.disable()
 s = StringIO()
 ps = pstats.Stats(pr, stream=s).strip_dirs().sort_stats("cumtime").print_stats(20)
