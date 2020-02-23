@@ -330,6 +330,7 @@ for epoch in range(max_epoch):
         # Save model
         dt = datetime.now().strftime("%y%m%d.%H%M%S")
         torch.save(model.state_dict(), f"./model.{epoch}.{dt}.ph")
+        best_loss = loss
 
 
 # Save model
