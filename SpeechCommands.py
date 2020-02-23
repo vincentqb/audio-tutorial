@@ -24,6 +24,7 @@ device = "cuda" if torch.cuda.is_available() else "cpu"
 num_workers = 0
 pin_memory = False
 non_blocking = pin_memory
+bg_maxsize = 0
 
 labels = [
         "-",
@@ -168,6 +169,8 @@ def datasets():
     root = "./"
 
     dataset = PROCESSED_SPEECHCOMMANDS(root, download=download)
+    if bg_maxsize > 0:
+        dataset = torchaudio.data.utils.bg_iterator(dataset, bg_maxsize)
     dataset = MemoryCache(dataset)
     # dataset = SPEECHCOMMANDS(root, download=download)
 
