@@ -102,12 +102,23 @@ def build_mapping(labels):
     return {**d1, **d2}
 
 
-def map_and_pad(l, mapping, max_length, fillwith):
-    if hasattr(l, "tolist"):
-        l = l.tolist()
-    l = [mapping[t] for t in l]  # map with dict
-    l += [fillwith] * (max_length-len(l))  # add padding
-    return l
+mapping = build_mapping(labels)
+
+
+def encode(tensor):
+    return map_and_pad(tensor, mapping, max_length, mapping["*"])
+
+
+def decode(tensor):
+    return map_and_pad(tensor, mapping, max_length, mapping[1])
+
+
+def map_and_pad(tensor, mapping, max_length, fillwith):
+    if hasattr(tensor, "tolist"):
+        tensor = tensor.tolist()
+    tensor = [mapping[t] for t in tensor]  # map with dict
+    tensor += [fillwith] * (max_length-len(tensor))  # add padding
+    return tensor
 
 
 def process_datapoint(item):
@@ -115,7 +126,7 @@ def process_datapoint(item):
     target = item[2]
     # pick first channel, apply mfcc, tranpose for pad_sequence
     specgram = mfcc(waveform)[0, ...].transpose(0, -1)
-    target =  torch.tensor(encode(target), dtype=torch.long, device=device)
+    target = torch.tensor(encode(target), dtype=torch.long, device=device)
     return specgram, target
 
 
@@ -266,11 +277,6 @@ def greedy_decoder(outputs):
     return indices[:, 0, :]
 
 
-mapping = build_mapping(labels)
-
-encode = lambda l: map_and_pad(l, mapping, max_length, mapping["*"])
-decode = lambda l: map_and_pad(l, mapping, max_length, mapping[1])
-
 train = datasets()
 loader_train = DataLoader(
     train, batch_size=batch_size, collate_fn=collate_fn, shuffle=True,
@@ -337,14 +343,14 @@ model.eval()
 sample = inputs[0].unsqueeze(0).to(device, non_blocking=non_blocking)
 target = targets[0].to(device, non_blocking=non_blocking)
 
-print(targets[0[)
+print(targets[0])
 print(decode(targets[0]))
 
 output = model(sample)
 output = greedy_decoder(output)
 
 print(output)
-print(decode(greedy_output))
+print(decode(output))
 
 # Print performance
 pr.disable()
