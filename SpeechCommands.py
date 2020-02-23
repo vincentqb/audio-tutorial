@@ -7,6 +7,7 @@ import collections
 import cProfile
 import pstats
 from io import StringIO
+from datetime import datetime
 
 import torch
 from torch import nn, topk
@@ -79,7 +80,7 @@ optimizer_params = {
     "rho": 0.95,
 }
 
-max_epoch = 10
+max_epoch = 80
 clip_norm = 10.
 
 
@@ -332,6 +333,12 @@ for epoch in range(max_epoch):
         optimizer.step()
 
     print(epoch, loss)
+
+
+dt = datetime.now().strftime("%y%m%d.%H%M%S")
+torch.save(model.state_dict(), f"./model.{epoch}.{dt}.ph")
+
+model.eval()
 
 # inputs, targets, _, _ = next(loader_train)
 sample = inputs[0].unsqueeze(0).to(device)
