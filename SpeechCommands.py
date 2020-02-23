@@ -253,7 +253,7 @@ class Wav2Letter(nn.Module):
         return log_probs
 
 
-def GreedyDecoder(outputs):
+def greedy_decoder(outputs):
     """Greedy Decoder. Returns highest probability of class labels for each timestep
 
     Args:
@@ -281,7 +281,7 @@ model = Wav2Letter(n_mfcc, vocab_size).to(device, non_blocking=non_blocking)
 optimizer = Adadelta(model.parameters(), **optimizer_params)
 criterion = torch.nn.CTCLoss()
 
-
+# Profiling performance
 pr = cProfile.Profile()
 pr.enable()
 
@@ -341,7 +341,7 @@ print(targets[0[)
 print(decode(targets[0]))
 
 output = model(sample)
-output = GreedyDecoder(output)
+output = greedy_decoder(output)
 
 print(output)
 print(decode(greedy_output))
