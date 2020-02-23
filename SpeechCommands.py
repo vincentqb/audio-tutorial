@@ -110,7 +110,7 @@ class Coder:
 
     def encode(self, iterable):
         iterable = self._map_and_pad(iterable, self.mapping["*"])
-        return torch.tensor(iterable, dtype=torch.long)  #, device=device)
+        return torch.tensor(iterable, dtype=torch.long)
 
     def decode(self, tensor):
         # FIXME detect size before taking first element
