@@ -108,9 +108,9 @@ class Coder:
         iterable += [fillwith] * (self.max_length-len(iterable))  # add padding
         return iterable
 
-    def encode(self, iterable):
+    def encode(self, iterable, device):
         iterable = self._map_and_pad(iterable, self.mapping["*"])
-        return torch.tensor(iterable, dtype=torch.long)
+        return torch.tensor(iterable, dtype=torch.long, device=device)
 
     def decode(self, tensor):
         # FIXME detect size before taking first element
@@ -128,7 +128,7 @@ def process_datapoint(item):
     target = item[2]
     # pick first channel, apply mfcc, tranpose for pad_sequence
     specgram = mfcc(waveform)[0, ...].transpose(0, -1)
-    target = encode(target)
+    target = encode(target, device=specgram.device)
     return specgram, target
 
 
