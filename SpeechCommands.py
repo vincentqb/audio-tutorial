@@ -85,6 +85,7 @@ optimizer_params = {
 max_epoch = 80
 clip_norm = 10.
 
+dtstamp = datetime.now().strftime("%y%m%d.%H%M%S")
 
 torchaudio.set_audio_backend(audio_backend)
 mfcc = MFCC(sample_rate=sample_rate, n_mfcc=n_mfcc, melkwargs=melkwargs)
@@ -328,14 +329,12 @@ for epoch in range(max_epoch):
 
     if (loss < best_loss).all():
         # Save model
-        dt = datetime.now().strftime("%y%m%d.%H%M%S")
-        torch.save(model.state_dict(), f"./model.{epoch}.{dt}.ph")
+        torch.save(model.state_dict(), f"./model.{dtstamp}.{epoch}.ph")
         best_loss = loss
 
 
 # Save model
-dt = datetime.now().strftime("%y%m%d.%H%M%S")
-torch.save(model.state_dict(), f"./model.{epoch}.{dt}.ph")
+torch.save(model.state_dict(), f"./model.{dtstamp}.{epoch}.ph")
 
 # Switch to evaluation mode
 model.eval()
