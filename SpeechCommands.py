@@ -21,6 +21,9 @@ from torchaudio.transforms import MFCC
 
 audio_backend = "soundfile"
 device = "cuda" if torch.cuda.is_available() else "cpu"
+num_workers = 0
+pin_memory = False
+non_blocking = pin_memory
 
 labels = [
         "-",
@@ -285,9 +288,12 @@ encode = lambda l: apply_with_padding(l, mapping, max_length, mapping["*"])
 decode = lambda l: apply_with_padding(l, mapping, max_length, mapping[1])
 
 train = datasets()
-loader_train = DataLoader(train, batch_size=batch_size, collate_fn=collate_fn, shuffle=True)
+loader_train = DataLoader(
+    train, batch_size=batch_size, collate_fn=collate_fn, shuffle=True,
+    num_workers=_num_workers, pin_memory=pin_memory,
+)
 
-model = Wav2Letter(n_mfcc, vocab_size).to(device)
+model = Wav2Letter(n_mfcc, vocab_size).to(device, non_blocking=non_blocking)
 optimizer = Adadelta(model.parameters(), **optimizer_params)
 criterion = torch.nn.CTCLoss()
 
@@ -299,8 +305,8 @@ for epoch in range(max_epoch):
 
     for inputs, targets, _, _ in tqdm(loader_train):
 
-        inputs = inputs.to(device)
-        targets = targets.to(device)
+        inputs = inputs.to(device, non_blocking=non_blocking)
+        targets = targets.to(device, non_blocking=non_blocking)
         outputs = model(inputs)
         outputs = outputs.transpose(1, 2).transpose(0, 1)
 
@@ -341,8 +347,8 @@ torch.save(model.state_dict(), f"./model.{epoch}.{dt}.ph")
 model.eval()
 
 # inputs, targets, _, _ = next(loader_train)
-sample = inputs[0].unsqueeze(0).to(device)
-target = targets[0].to(device)
+sample = inputs[0].unsqueeze(0).to(device, non_blocking=non_blocking)
+target = targets[0].to(device, non_blocking=non_blocking)
 
 print(decode(targets[0].tolist()))
 
