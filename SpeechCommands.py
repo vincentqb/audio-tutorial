@@ -293,7 +293,7 @@ decode = lambda l: apply_with_padding(l, mapping, max_length, mapping[1])
 train = datasets()
 loader_train = DataLoader(
     train, batch_size=batch_size, collate_fn=collate_fn, shuffle=True,
-    num_workers=_num_workers, pin_memory=pin_memory,
+    num_workers=num_workers, pin_memory=pin_memory,
 )
 
 model = Wav2Letter(n_mfcc, vocab_size).to(device, non_blocking=non_blocking)
@@ -349,7 +349,6 @@ torch.save(model.state_dict(), f"./model.{epoch}.{dt}.ph")
 
 model.eval()
 
-# inputs, targets, _, _ = next(loader_train)
 sample = inputs[0].unsqueeze(0).to(device, non_blocking=non_blocking)
 target = targets[0].to(device, non_blocking=non_blocking)
 
@@ -365,6 +364,6 @@ print(greedy_output)
 print(decode(greedy_output.tolist()[0]))
 
 pr.disable()
-s = StringIO.StringIO()
+s = StringIO()
 ps = pstats.Stats(pr, stream=s).strip_dirs().sort_stats("cumtime").print_stats(20)
 print(s.getvalue())
