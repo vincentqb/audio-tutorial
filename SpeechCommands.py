@@ -103,14 +103,14 @@ class Coder:
         d2 = collections.OrderedDict(flipped)
         self.mapping = {**d1, **d2}
 
-    def _map_and_pad(self, tensor, fillwith):
-        tensor = [self.mapping[t] for t in tensor]  # map with dict
-        tensor += [fillwith] * (self.max_length-len(tensor))  # add padding
-        return tensor
+    def _map_and_pad(self, iterable, fillwith):
+        iterable = [self.mapping[i] for i in iterable]  # map with dict
+        iterable += [fillwith] * (self.max_length-len(iterable))  # add padding
+        return iterable
 
-    def encode(self, tensor):
-        encoded = self._map_and_pad(tensor, self.mapping["*"])
-        return torch.tensor(encode(encoded), dtype=torch.long)  #, device=device)
+    def encode(self, iterable):
+        iterable = self._map_and_pad(iterable, self.mapping["*"])
+        return torch.tensor(iterable, dtype=torch.long)  #, device=device)
 
     def decode(self, tensor):
         # FIXME detect size before taking first element
