@@ -284,8 +284,8 @@ loader_train = DataLoader(
 )
 
 model = Wav2Letter(n_mfcc, vocab_size)
-model = model.to(device, non_blocking=non_blocking)
 model = torch.jit.script(model)
+model = model.to(device, non_blocking=non_blocking)
 
 optimizer = Adadelta(model.parameters(), **optimizer_params)
 criterion = torch.nn.CTCLoss()
