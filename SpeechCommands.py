@@ -65,7 +65,6 @@ labels = [
         "yes",
         "zero",
 ]
-max_length = max(map(len, labels))
 vocab_size = len(labels) + 2
 
 # audio, self.sr, window_stride=(160, 80), fft_size=512, num_filt=20, num_coeffs=13
@@ -92,33 +91,36 @@ torchaudio.set_audio_backend(audio_backend)
 mfcc = MFCC(sample_rate=sample_rate, n_mfcc=n_mfcc, melkwargs=melkwargs)
 
 
-def build_mapping(labels):
-    labels = list(collections.OrderedDict.fromkeys(list("".join(labels))))
-    enumerated = list(enumerate(labels))
-    flipped = [(sub[1], sub[0]) for sub in enumerated]
+class Coder:
+    def __init__(self, labels):
+        self.max_length = max(map(len, labels))
 
-    d1 = collections.OrderedDict(enumerated)
-    d2 = collections.OrderedDict(flipped)
-    return {**d1, **d2}
+        labels = list(collections.OrderedDict.fromkeys(list("".join(labels))))
+        enumerated = list(enumerate(labels))
+        flipped = [(sub[1], sub[0]) for sub in enumerated]
+
+        d1 = collections.OrderedDict(enumerated)
+        d2 = collections.OrderedDict(flipped)
+        self.mapping = {**d1, **d2}
+
+    def _map_and_pad(self, tensor, fillwith):
+        tensor = [self.mapping[t] for t in tensor]  # map with dict
+        tensor += [fillwith] * (self.max_length-len(tensor))  # add padding
+        return tensor
+
+    def encode(self, tensor):
+        encoded = self._map_and_pad(tensor, self.mapping["*"])
+        return torch.tensor(encode(encoded), dtype=torch.long)  #, device=device)
+
+    def decode(self, tensor):
+        # FIXME detect size before taking first element
+        tensor = tensor.tolist()[0] if hasattr(tensor, "tolist") else tensor
+        return self._map_and_pad(tensor, self.mapping[1])
 
 
-mapping = build_mapping(labels)
-
-
-def encode(tensor):
-    return map_and_pad(tensor, mapping, max_length, mapping["*"])
-
-
-def decode(tensor):
-    return map_and_pad(tensor, mapping, max_length, mapping[1])
-
-
-def map_and_pad(tensor, mapping, max_length, fillwith):
-    if hasattr(tensor, "tolist"):
-        tensor = tensor.tolist()
-    tensor = [mapping[t] for t in tensor]  # map with dict
-    tensor += [fillwith] * (max_length-len(tensor))  # add padding
-    return tensor
+coder = Coder(labels)
+encode = coder.encode
+decode = coder.decode
 
 
 def process_datapoint(item):
@@ -126,7 +128,7 @@ def process_datapoint(item):
     target = item[2]
     # pick first channel, apply mfcc, tranpose for pad_sequence
     specgram = mfcc(waveform)[0, ...].transpose(0, -1)
-    target = torch.tensor(encode(target), dtype=torch.long, device=device)
+    target = encode(target)
     return specgram, target
 
 
@@ -350,7 +352,7 @@ output = model(sample)
 output = greedy_decoder(output)
 
 print(output)
-print(decode(output))
+print(decode(output[0]))
 
 # Print performance
 pr.disable()
