@@ -113,8 +113,7 @@ class Coder:
         return torch.tensor(iterable, dtype=torch.long, device=device)
 
     def decode(self, tensor):
-        # FIXME detect size before taking first element
-        tensor = tensor.tolist()[0] if hasattr(tensor, "tolist") else tensor
+        tensor = tensor.tolist() if hasattr(tensor, "tolist") else tensor
         return self._map_and_pad(tensor, self.mapping[1])
 
 
