@@ -83,7 +83,7 @@ optimizer_params = {
 }
 
 max_epoch = 80
-clip_norm = 10.
+clip_norm = 0.
 
 dtstamp = datetime.now().strftime("%y%m%d.%H%M%S")
 
@@ -325,7 +325,8 @@ for epoch in range(max_epoch):
 
         optimizer.zero_grad()
         loss.backward()
-        torch.nn.utils.clip_grad_norm_(model.parameters(), clip_norm)
+        if clip_norm > 0:
+            torch.nn.utils.clip_grad_norm_(model.parameters(), clip_norm)
         optimizer.step()
 
     print(epoch, loss)
