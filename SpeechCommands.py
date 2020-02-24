@@ -109,12 +109,19 @@ class Coder:
         return iterable
 
     def encode(self, iterable, device):
-        iterable = self._map_and_pad(iterable, self.mapping["*"])
-        return torch.tensor(iterable, dtype=torch.long, device=device)
+        if isinstance(iterable[0], list):
+            return torch.stack([self.encode(i) for i in iterable])
+        else:
+            iterable = self._map_and_pad(iterable, self.mapping["*"])
+            return torch.tensor(iterable, dtype=torch.long, device=device)
 
     def decode(self, tensor):
-        tensor = tensor.tolist() if hasattr(tensor, "tolist") else tensor
-        return self._map_and_pad(tensor, self.mapping[1])
+        if hasattr(tensor, "tolist"):
+            tensor = tensor.tolist()
+        if isinstance(tensor[0], list):
+            return [self.decode(t) for t in tensor]
+        else:
+            return self._map_and_pad(tensor, self.mapping[1])
 
 
 coder = Coder(labels)
