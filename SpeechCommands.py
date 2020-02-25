@@ -108,20 +108,17 @@ class Coder:
         iterable += [fillwith] * (self.max_length-len(iterable))  # add padding
         return iterable
 
-    def encode(self, iterable, device):
+    def encode(self, iterable):
         if isinstance(iterable[0], list):
-            return torch.stack([self.encode(i) for i in iterable])
+            return [self.encode(i) for i in iterable]
         else:
-            iterable = self._map_and_pad(iterable, self.mapping["*"])
-            return torch.tensor(iterable, dtype=torch.long, device=device)
+            return self._map_and_pad(iterable, self.mapping["*"])
 
     def decode(self, tensor):
-        if hasattr(tensor, "tolist"):
-            tensor = tensor.tolist()
         if isinstance(tensor[0], list):
             return [self.decode(t) for t in tensor]
         else:
-            return self._map_and_pad(tensor, self.mapping[1])
+            return "".join(self._map_and_pad(tensor, self.mapping[1]))
 
 
 coder = Coder(labels)
@@ -134,7 +131,8 @@ def process_datapoint(item):
     target = item[2]
     # pick first channel, apply mfcc, tranpose for pad_sequence
     specgram = mfcc(waveform)[0, ...].transpose(0, -1)
-    target = encode(target, device=specgram.device)
+    target = encode(target)
+    target = torch.tensor(target, dtype=torch.long, device=waveform.device)
     return specgram, target
 
 
@@ -183,16 +181,6 @@ def collate_fn(batch):
 
     tensors = [b[0] for b in batch if b]
     targets = [b[1] for b in batch if b]
-
-    # tensors = [process_waveform(b[0]) for b in batch if b]
-    # targets = [process_target(b[2]) for b in batch if b]
-
-    # truncate tensor list
-    # length = 2**10
-    # a = max(0, min([tensor.shape[-1] for tensor in tensors]) - length)
-    # m = randint(0, a)
-    # n = m + length
-    # tensors = [t[..., m:n] for t in tensors]
 
     input_lengths = [t.shape[0] for t in tensors]
     target_lengths = [len(t) for t in targets]
@@ -353,13 +341,13 @@ sample = inputs[0].unsqueeze(0).to(device, non_blocking=non_blocking)
 target = targets[0].to(device, non_blocking=non_blocking)
 
 print(targets[0])
-print(decode(targets[0]))
+print(decode(targets[0].tolist()))
 
 output = model(sample)
 output = greedy_decoder(output)
 
 print(output)
-print(decode(output[0]))
+print(decode(output[0].tolist()))
 
 # Print performance
 pr.disable()
