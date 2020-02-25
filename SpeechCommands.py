@@ -139,15 +139,17 @@ def process_datapoint(item):
 
 class PROCESSED_SPEECHCOMMANDS(SPEECHCOMMANDS):
     def __getitem__(self, n):
-        return process_datapoint(super().__getitem__(n))
+        item = super().__getitem__(n)
+        return process_datapoint(item)
 
     def __next__(self):
-        return process_datapoint(super().__next__())
+        item = super().__getitem__(n)
+        return process_datapoint(item)
 
 
 class MemoryCache(torch.utils.data.Dataset):
     """
-    Wrap a dataset so that, whenever a new item is returned, it is saved to disk.
+    Wrap a dataset so that, whenever a new item is returned, it is saved to memory.
     """
 
     def __init__(self, dataset):
@@ -194,7 +196,7 @@ def collate_fn(batch):
 
 class PrintLayer(nn.Module):
     def __init__(self):
-        super(PrintLayer, self).__init__()
+        super().__init__()
 
     def forward(self, x):
         print(x)
@@ -212,7 +214,7 @@ class Wav2Letter(nn.Module):
     """
 
     def __init__(self, num_features, num_classes):
-        super(Wav2Letter, self).__init__()
+        super().__init__()
 
         # Conv1d(in_channels, out_channels, kernel_size, stride)
         self.layers = nn.Sequential(
