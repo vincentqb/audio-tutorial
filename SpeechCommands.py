@@ -407,8 +407,7 @@ for epoch in range(max_epoch):
         sum_loss += loss.item()
 
     # Average loss
-    sum_loss = sum_loss / len(loader_training)
-    print("training", epoch, sum_loss)
+    sum_loss_training = sum_loss / len(loader_training)
 
     with torch.no_grad():
 
@@ -442,8 +441,9 @@ for epoch in range(max_epoch):
             sum_loss += loss.item()
 
         # Average loss
-        sum_loss = sum_loss / len(loader_validation)
-        print("validation", epoch, sum_loss)
+        sum_loss_validation = sum_loss / len(loader_validation)
+
+    print(f"{epoch}: {sum_loss_training:.5f}, sum_loss_validation:.5f")
 
     if (loss < best_loss).all():
         # Save model
