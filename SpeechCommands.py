@@ -366,6 +366,8 @@ best_loss = 1.
 
 for epoch in range(max_epoch):
 
+    model.train()
+
     sum_loss = 0.
     for inputs, targets, _, _ in tqdm(loader_training):
 
@@ -405,6 +407,9 @@ for epoch in range(max_epoch):
     print("training", epoch, sum_loss)
 
     with torch.no_grad():
+
+        model.eval()
+
         sum_loss = 0.
         for inputs, targets, _, _ in loader_validation:
             inputs = inputs.to(device, non_blocking=non_blocking)
