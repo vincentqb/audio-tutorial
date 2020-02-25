@@ -91,7 +91,7 @@ max_epoch = 80
 clip_norm = 0.
 
 training_percentage = 10.
-validation_percentage = 10.
+validation_percentage = 5.
 MAX_NUM_WAVS_PER_CLASS = 2**27 - 1  # ~134M
 
 dtstamp = datetime.now().strftime("%y%m%d.%H%M%S")
