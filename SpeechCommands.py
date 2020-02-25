@@ -96,6 +96,7 @@ MAX_NUM_WAVS_PER_CLASS = 2**27 - 1  # ~134M
 
 dtstamp = datetime.now().strftime("%y%m%d.%H%M%S")
 
+
 # Profiling performance
 pr = cProfile.Profile()
 pr.enable()
@@ -204,6 +205,7 @@ class FILTERED_SPEECHCOMMANDS(SPEECHCOMMANDS):
             testing_percentage = (100. - training_percentage - validation_percentage)
             self._walker = list(filter(lambda x: which_set(x, validation_percentage, testing_percentage) == tag, self._walker))
 
+
 class PROCESSED_SPEECHCOMMANDS(FILTERED_SPEECHCOMMANDS):
 
     def __init__(self, *args, **kwargs):
@@ -214,7 +216,7 @@ class PROCESSED_SPEECHCOMMANDS(FILTERED_SPEECHCOMMANDS):
         return process_datapoint(item)
 
     def __next__(self):
-        item = super().__getitem__(n)
+        item = super().__next__()
         return process_datapoint(item)
 
 
