@@ -342,6 +342,10 @@ def greedy_decoder(outputs):
     return indices[:, 0, :]
 
 
+# Profiling performance
+pr = cProfile.Profile()
+pr.enable()
+
 loader_training = DataLoader(
     training, batch_size=batch_size, collate_fn=collate_fn, shuffle=shuffle,
     num_workers=num_workers, pin_memory=pin_memory,
@@ -357,10 +361,6 @@ model = model.to(device, non_blocking=non_blocking)
 
 optimizer = Adadelta(model.parameters(), **optimizer_params)
 criterion = torch.nn.CTCLoss()
-
-# Profiling performance
-pr = cProfile.Profile()
-pr.enable()
 
 best_loss = 1.
 
