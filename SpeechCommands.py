@@ -5,17 +5,21 @@
 
 import collections
 import cProfile
+import hashlib
+import itertools
+import os
 import pstats
-from io import StringIO
+import re
 from datetime import datetime
+from io import StringIO
+
+from tqdm import tqdm
 
 import torch
+import torchaudio
 from torch import nn, topk
 from torch.optim import Adadelta
 from torch.utils.data import DataLoader
-from tqdm import tqdm
-
-import torchaudio
 from torchaudio.datasets import SPEECHCOMMANDS
 from torchaudio.transforms import MFCC
 
@@ -86,6 +90,10 @@ optimizer_params = {
 max_epoch = 80
 clip_norm = 0.
 
+training_percentage = 10.
+validation_percentage = 10.
+MAX_NUM_WAVS_PER_CLASS = 2**27 - 1  # ~134M
+
 dtstamp = datetime.now().strftime("%y%m%d.%H%M%S")
 
 torchaudio.set_audio_backend(audio_backend)
@@ -137,7 +145,64 @@ def process_datapoint(item):
     return specgram, target
 
 
-class PROCESSED_SPEECHCOMMANDS(SPEECHCOMMANDS):
+def which_set(filename, validation_percentage, testing_percentage):
+    """Determines which data partition the file should belong to.
+
+    We want to keep files in the same training, validation, or testing sets even
+    if new ones are added over time. This makes it less likely that testing
+    samples will accidentally be reused in training when long runs are restarted
+    for example. To keep this stability, a hash of the filename is taken and used
+    to determine which set it should belong to. This determination only depends on
+    the name and the set proportions, so it won't change as other files are added.
+
+    It's also useful to associate particular files as related (for example words
+    spoken by the same person), so anything after '_nohash_' in a filename is
+    ignored for set determination. This ensures that 'bobby_nohash_0.wav' and
+    'bobby_nohash_1.wav' are always in the same set, for example.
+
+    Args:
+        filename: File path of the data sample.
+        validation_percentage: How much of the data set to use for validation.
+        testing_percentage: How much of the data set to use for testing.
+
+    Returns:
+        String, one of 'training', 'validation', or 'testing'.
+    """
+    base_name = os.path.basename(filename)
+    # We want to ignore anything after '_nohash_' in the file name when
+    # deciding which set to put a wav in, so the data set creator has a way of
+    # grouping wavs that are close variations of each other.
+    hash_name = re.sub(r'_nohash_.*$', '', base_name).encode("utf-8")
+    # This looks a bit magical, but we need to decide whether this file should
+    # go into the training, testing, or validation sets, and we want to keep
+    # existing files in the same set even if more files are subsequently
+    # added.
+    # To do that, we need a stable way of deciding based on just the file name
+    # itself, so we do a hash of that and then use that to generate a
+    # probability value that we use to assign it.
+    hash_name_hashed = hashlib.sha1(hash_name).hexdigest()
+    percentage_hash = ((int(hash_name_hashed, 16) % (MAX_NUM_WAVS_PER_CLASS + 1)) * (100.0 / MAX_NUM_WAVS_PER_CLASS))
+    if percentage_hash < validation_percentage:
+        result = 'validation'
+    elif percentage_hash < (testing_percentage + validation_percentage):
+        result = 'testing'
+    else:
+        result = 'training'
+    return result
+
+
+class FILTERED_SPEECHCOMMANDS(SPEECHCOMMANDS):
+    def __init__(self, tag, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        if training_percentage < 100.:
+            testing_percentage = (100. - training_percentage - validation_percentage)
+            self._walker = list(filter(lambda x: which_set(x, validation_percentage, testing_percentage) == tag, self._walker))
+
+class PROCESSED_SPEECHCOMMANDS(FILTERED_SPEECHCOMMANDS):
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+
     def __getitem__(self, n):
         item = super().__getitem__(n)
         return process_datapoint(item)
@@ -173,10 +238,14 @@ class MemoryCache(torch.utils.data.Dataset):
 def datasets():
     root = "./"
 
-    dataset = PROCESSED_SPEECHCOMMANDS(root, download=True)
-    dataset = MemoryCache(dataset)
+    training = PROCESSED_SPEECHCOMMANDS("training", root, download=True)
+    training = MemoryCache(training)
+    validation = PROCESSED_SPEECHCOMMANDS("validation", root, download=True)
+    validation = MemoryCache(validation)
+    testing = PROCESSED_SPEECHCOMMANDS("testing", root, download=True)
+    testing = MemoryCache(testing)
 
-    return dataset
+    return training, validation, testing
 
 
 def collate_fn(batch):
@@ -273,9 +342,12 @@ def greedy_decoder(outputs):
     return indices[:, 0, :]
 
 
-train = datasets()
-loader_train = DataLoader(
-    train, batch_size=batch_size, collate_fn=collate_fn, shuffle=shuffle,
+loader_training = DataLoader(
+    training, batch_size=batch_size, collate_fn=collate_fn, shuffle=shuffle,
+    num_workers=num_workers, pin_memory=pin_memory,
+)
+loader_validation = DataLoader(
+    validation, batch_size=batch_size, collate_fn=collate_fn, shuffle=False,
     num_workers=num_workers, pin_memory=pin_memory,
 )
 
@@ -294,7 +366,8 @@ best_loss = 1.
 
 for epoch in range(max_epoch):
 
-    for inputs, targets, _, _ in tqdm(loader_train):
+    sum_loss = 0.
+    for inputs, targets, _, _ in tqdm(loader_training):
 
         inputs = inputs.to(device, non_blocking=non_blocking)
         targets = targets.to(device, non_blocking=non_blocking)
@@ -325,7 +398,43 @@ for epoch in range(max_epoch):
             torch.nn.utils.clip_grad_norm_(model.parameters(), clip_norm)
         optimizer.step()
 
-    print(epoch, loss)
+        sum_loss += loss
+
+    # Average loss
+    loss = sum_loss / len(loader_training)
+    print("training", epoch, loss)
+
+    with torch.no_grad():
+        sum_loss = 0.
+        for inputs, targets, _, _ in loader_validation:
+            inputs = inputs.to(device, non_blocking=non_blocking)
+            targets = targets.to(device, non_blocking=non_blocking)
+            outputs = model(inputs)
+            outputs = outputs.transpose(1, 2).transpose(0, 1)
+
+            this_batch_size = len(inputs)
+
+            input_lengths = torch.full(
+                (this_batch_size,), outputs.shape[0], dtype=torch.long, device=outputs.device
+            )
+            target_lengths = torch.tensor(
+                [target.shape[0] for target in targets], dtype=torch.long, device=targets.device
+            )
+
+            # CTC
+            # https://pytorch.org/docs/master/nn.html#torch.nn.CTCLoss
+            # https://discuss.pytorch.org/t/ctcloss-with-warp-ctc-help/8788/3
+            # outputs: input length, batch size, number of classes (including blank)
+            # targets: batch size, max target length
+            # input_lengths: batch size
+            # target_lengths: batch size
+            loss = criterion(outputs, targets, input_lengths, target_lengths)
+
+            sum_loss += loss
+
+        # Average loss
+        loss = sum_loss / len(loader_validation)
+        print("validation", epoch, loss)
 
     if (loss < best_loss).all():
         # Save model
