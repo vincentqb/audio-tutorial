@@ -65,6 +65,7 @@ labels = [
         "zero",
 ]
 vocab_size = len(labels) + 2
+shuffle = False
 
 # audio, self.sr, window_stride=(160, 80), fft_size=512, num_filt=20, num_coeffs=13
 n_mfcc = 13
@@ -172,7 +173,6 @@ def datasets():
 
     dataset = PROCESSED_SPEECHCOMMANDS(root, download=True)
     dataset = MemoryCache(dataset)
-    # dataset = SPEECHCOMMANDS(root, download=download)
 
     return dataset
 
@@ -273,7 +273,7 @@ def greedy_decoder(outputs):
 
 train = datasets()
 loader_train = DataLoader(
-    train, batch_size=batch_size, collate_fn=collate_fn, shuffle=True,
+    train, batch_size=batch_size, collate_fn=collate_fn, shuffle=shuffle,
     num_workers=num_workers, pin_memory=pin_memory,
 )
 
