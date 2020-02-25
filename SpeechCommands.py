@@ -102,7 +102,7 @@ pr.enable()
 
 torchaudio.set_audio_backend(audio_backend)
 mfcc = MFCC(sample_rate=sample_rate, n_mfcc=n_mfcc, melkwargs=melkwargs)
-# mfcc.to(device)
+mfcc.to(device)
 
 
 class Coder:
@@ -140,8 +140,9 @@ encode = coder.encode
 decode = coder.decode
 
 
+# @torch.jit.script
 def process_datapoint(item):
-    waveform = item[0]
+    waveform = item[0].to(device, non_blocking=non_blocking)
     target = item[2]
     # pick first channel, apply mfcc, tranpose for pad_sequence
     specgram = mfcc(waveform)[0, ...].transpose(0, -1)
