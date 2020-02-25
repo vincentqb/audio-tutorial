@@ -398,11 +398,11 @@ for epoch in range(max_epoch):
             torch.nn.utils.clip_grad_norm_(model.parameters(), clip_norm)
         optimizer.step()
 
-        sum_loss += loss
+        sum_loss += loss.item()
 
     # Average loss
-    loss = sum_loss / len(loader_training)
-    print("training", epoch, loss)
+    sum_loss = sum_loss / len(loader_training)
+    print("training", epoch, sum_loss)
 
     with torch.no_grad():
         sum_loss = 0.
@@ -430,16 +430,16 @@ for epoch in range(max_epoch):
             # target_lengths: batch size
             loss = criterion(outputs, targets, input_lengths, target_lengths)
 
-            sum_loss += loss
+            sum_loss += loss.item()
 
         # Average loss
-        loss = sum_loss / len(loader_validation)
-        print("validation", epoch, loss)
+        sum_loss = sum_loss / len(loader_validation)
+        print("validation", epoch, sum_loss)
 
     if (loss < best_loss).all():
         # Save model
         torch.save(model.state_dict(), f"./model.{dtstamp}.{epoch}.ph")
-        best_loss = loss
+        best_loss = sum_loss
 
 
 # Save model
