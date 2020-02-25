@@ -96,8 +96,13 @@ MAX_NUM_WAVS_PER_CLASS = 2**27 - 1  # ~134M
 
 dtstamp = datetime.now().strftime("%y%m%d.%H%M%S")
 
+# Profiling performance
+pr = cProfile.Profile()
+pr.enable()
+
 torchaudio.set_audio_backend(audio_backend)
 mfcc = MFCC(sample_rate=sample_rate, n_mfcc=n_mfcc, melkwargs=melkwargs)
+# mfcc.to(device)
 
 
 class Coder:
@@ -341,10 +346,6 @@ def greedy_decoder(outputs):
     _, indices = topk(outputs, k=1, dim=1)
     return indices[:, 0, :]
 
-
-# Profiling performance
-pr = cProfile.Profile()
-pr.enable()
 
 loader_training = DataLoader(
     training, batch_size=batch_size, collate_fn=collate_fn, shuffle=shuffle,
