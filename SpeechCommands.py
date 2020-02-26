@@ -70,6 +70,7 @@ labels = [
 ]
 vocab_size = len(labels) + 2
 shuffle = False
+drop_last = True
 
 # audio, self.sr, window_stride=(160, 80), fft_size=512, num_filt=20, num_coeffs=13
 n_mfcc = 13
@@ -87,8 +88,8 @@ optimizer_params = {
     "rho": 0.95,
 }
 
-hidden_size = 128
-num_layers = 3
+hidden_size = 8
+num_layers = 1
 
 max_epoch = 80
 clip_norm = 0.
@@ -149,7 +150,8 @@ def process_datapoint(item):
     waveform = item[0].to(device, non_blocking=non_blocking)
     target = item[2]
     # pick first channel, apply mfcc, tranpose for pad_sequence
-    specgram = mfcc(waveform)[0, ...].transpose(0, -1)
+    # specgram = mfcc(waveform)[0, ...].transpose(0, -1)
+    specgram = waveform[0, ...].view(1, -1).transpose(0, -1)
     target = encode(target)
     target = torch.tensor(target, dtype=torch.long, device=waveform.device)
     return specgram, target
@@ -340,18 +342,40 @@ class Wav2Letter(nn.Module):
 
         return log_probs
 
+
 class BiLSTM(nn.Module):
-    def __init__(self, num_features):
+    def __init__(self, num_features, num_classes):
         super().__init__()
 
         # self.layers = nn.GRU(num_features, hidden_size, num_layers=3, batch_first=True, bidirectional=True)
-        self.layers = nn.LSTM(num_features, hidden_size, num_layers=num_layers, batch_first=True, bidirectional=True)
+        # self.layers = nn.LSTM(num_features, hidden_size, num_layers=num_layers, batch_first=True, bidirectional=True)
+        # https://discuss.pytorch.org/t/lstm-to-bi-lstm/12967
+        # self.lstm = nn.LSTM(num_features, hidden_size, num_layers=num_layers, batch_first=True, bidirectional=True)
+        self.lstm = nn.LSTM(num_features, hidden_size, num_layers=num_layers, batch_first=True, bidirectional=True)
+        self.hidden2class = nn.Linear(2*hidden_size, num_classes)
+        self.hidden = self.init_hidden()
+
+    def init_hidden(self):
+        # Before we've done anything, we dont have any hidden state.
+        # Refer to the Pytorch documentation to see exactly
+        # why they have this dimensionality.
+        # The axes semantics are (num_layers * num_directions, minibatch_size, hidden_dim)
+        return (torch.autograd.Variable(torch.zeros(2*num_layers, batch_size, hidden_size)).to(device),
+                torch.autograd.Variable(torch.zeros(2*num_layers, batch_size, hidden_size)).to(device))
 
     def forward(self, inputs):
         inputs = inputs.transpose(-1, -2)
-        outputs, _ = self.layers(inputs)
-        outputs = outputs.transpose(1, 2).transpose(0, 1)
-        return outputs
+        # outputs, _ = self.layers(inputs)
+        # print(inputs.shape)
+        outputs, self.hidden = self.lstm(inputs, self.hidden)
+        self.hidden = (self.hidden[0].detach(), self.hidden[1].detach())
+        # print(outputs.shape)
+        # outputs = outputs.view(batch_size, 2*hidden_size, -1)
+        outputs = self.hidden2class(outputs)
+
+        log_probs = nn.functional.log_softmax(outputs, dim=1)
+        log_probs = log_probs.transpose(1, 2).transpose(0, 1)
+        return log_probs
 
 
 def greedy_decoder(outputs):
@@ -368,16 +392,16 @@ def greedy_decoder(outputs):
 
 
 loader_training = DataLoader(
-    training, batch_size=batch_size, collate_fn=collate_fn, shuffle=shuffle,
+    training, batch_size=batch_size, collate_fn=collate_fn, shuffle=shuffle, drop_last=drop_last,
     num_workers=num_workers, pin_memory=pin_memory,
 )
 loader_validation = DataLoader(
-    validation, batch_size=batch_size, collate_fn=collate_fn, shuffle=False,
+    validation, batch_size=batch_size, collate_fn=collate_fn, shuffle=False, drop_last=drop_last,
     num_workers=num_workers, pin_memory=pin_memory,
 )
 
 # model = Wav2Letter(n_mfcc, vocab_size)
-model = BiLSTM(n_mfcc)
+model = BiLSTM(1, vocab_size)
 
 # model = torch.jit.script(model)
 model = model.to(device, non_blocking=non_blocking)
