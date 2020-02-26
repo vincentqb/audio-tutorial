@@ -87,6 +87,9 @@ optimizer_params = {
     "rho": 0.95,
 }
 
+hidden_size = 128
+num_layers = 3
+
 max_epoch = 80
 clip_norm = 0.
 
@@ -333,8 +336,22 @@ class Wav2Letter(nn.Module):
 
         # compute log softmax probability on graphemes
         log_probs = nn.functional.log_softmax(y_pred, dim=1)
+        log_probs = log_probs.transpose(1, 2).transpose(0, 1)
 
         return log_probs
+
+class BiLSTM(nn.Module):
+    def __init__(self, num_features):
+        super().__init__()
+
+        # self.layers = nn.GRU(num_features, hidden_size, num_layers=3, batch_first=True, bidirectional=True)
+        self.layers = nn.LSTM(num_features, hidden_size, num_layers=num_layers, batch_first=True, bidirectional=True)
+
+    def forward(self, x):
+        inputs = inputs.transpose(-1, -2)
+        outputs, _ = model(inputs)
+        outputs = outputs.transpose(1, 2).transpose(0, 1)
+        return outputs
 
 
 def greedy_decoder(outputs):
@@ -359,8 +376,10 @@ loader_validation = DataLoader(
     num_workers=num_workers, pin_memory=pin_memory,
 )
 
-model = Wav2Letter(n_mfcc, vocab_size)
-model = torch.jit.script(model)
+# model = Wav2Letter(n_mfcc, vocab_size)
+model = BiLSTM(n_mfcc)
+
+# model = torch.jit.script(model)
 model = model.to(device, non_blocking=non_blocking)
 
 optimizer = Adadelta(model.parameters(), **optimizer_params)
@@ -378,7 +397,6 @@ for epoch in range(max_epoch):
         inputs = inputs.to(device, non_blocking=non_blocking)
         targets = targets.to(device, non_blocking=non_blocking)
         outputs = model(inputs)
-        outputs = outputs.transpose(1, 2).transpose(0, 1)
 
         this_batch_size = len(inputs)
 
@@ -418,7 +436,6 @@ for epoch in range(max_epoch):
             inputs = inputs.to(device, non_blocking=non_blocking)
             targets = targets.to(device, non_blocking=non_blocking)
             outputs = model(inputs)
-            outputs = outputs.transpose(1, 2).transpose(0, 1)
 
             this_batch_size = len(inputs)
 
