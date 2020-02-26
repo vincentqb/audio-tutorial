@@ -306,12 +306,12 @@ class Wav2Letter(nn.Module):
             nn.ReLU(),
             nn.Conv1d(250, 250, 7),
             nn.ReLU(),
-            # nn.Conv1d(250, 250, 7),
-            # nn.ReLU(),
-            # nn.Conv1d(250, 250, 7),
-            # nn.ReLU(),
             nn.Conv1d(250, 250, 7),
             nn.ReLU(),
+            # nn.Conv1d(250, 250, 7),
+            # nn.ReLU(),
+            # nn.Conv1d(250, 250, 7),
+            # nn.ReLU(),
             nn.Conv1d(250, 2000, 32),
             nn.ReLU(),
             nn.Conv1d(2000, 2000, 1),
@@ -443,7 +443,7 @@ for epoch in range(max_epoch):
         # Average loss
         sum_loss_validation = sum_loss / len(loader_validation)
 
-    print(f"{epoch}: {sum_loss_training:.5f}, sum_loss_validation:.5f")
+    print(f"{epoch}: {sum_loss_training:.5f}, {sum_loss_validation:.5f}")
 
     if (loss < best_loss).all():
         # Save model
