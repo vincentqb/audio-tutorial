@@ -346,7 +346,6 @@ class Wav2Letter(nn.Module):
 class BiLSTM(nn.Module):
     def __init__(self, num_features, num_classes):
         super().__init__()
-
         # self.layers = nn.GRU(num_features, hidden_size, num_layers=3, batch_first=True, bidirectional=True)
         # self.layers = nn.LSTM(num_features, hidden_size, num_layers=num_layers, batch_first=True, bidirectional=True)
         # https://discuss.pytorch.org/t/lstm-to-bi-lstm/12967
@@ -369,12 +368,11 @@ class BiLSTM(nn.Module):
         # print(inputs.shape)
         outputs, self.hidden = self.lstm(inputs, self.hidden)
         self.hidden = (self.hidden[0].detach(), self.hidden[1].detach())
-        # print(outputs.shape)
         # outputs = outputs.view(batch_size, 2*hidden_size, -1)
         outputs = self.hidden2class(outputs)
 
         log_probs = nn.functional.log_softmax(outputs, dim=1)
-        log_probs = log_probs.transpose(1, 2).transpose(0, 1)
+        log_probs = log_probs.transpose(0, 1)
         return log_probs
 
 
@@ -423,7 +421,6 @@ for epoch in range(max_epoch):
         outputs = model(inputs)
 
         this_batch_size = len(inputs)
-
         input_lengths = torch.full(
             (this_batch_size,), outputs.shape[0], dtype=torch.long, device=outputs.device
         )
@@ -462,7 +459,6 @@ for epoch in range(max_epoch):
             outputs = model(inputs)
 
             this_batch_size = len(inputs)
-
             input_lengths = torch.full(
                 (this_batch_size,), outputs.shape[0], dtype=torch.long, device=outputs.device
             )
