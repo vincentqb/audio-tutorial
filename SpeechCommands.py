@@ -347,9 +347,9 @@ class BiLSTM(nn.Module):
         # self.layers = nn.GRU(num_features, hidden_size, num_layers=3, batch_first=True, bidirectional=True)
         self.layers = nn.LSTM(num_features, hidden_size, num_layers=num_layers, batch_first=True, bidirectional=True)
 
-    def forward(self, x):
+    def forward(self, inputs):
         inputs = inputs.transpose(-1, -2)
-        outputs, _ = model(inputs)
+        outputs, _ = self.layers(inputs)
         outputs = outputs.transpose(1, 2).transpose(0, 1)
         return outputs
 
