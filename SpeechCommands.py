@@ -68,7 +68,6 @@ labels = [
         "yes",
         "zero",
 ]
-vocab_size = len(labels) + 2
 shuffle = False
 drop_last = True
 
@@ -115,6 +114,7 @@ class Coder:
         self.max_length = max(map(len, labels))
 
         labels = list(collections.OrderedDict.fromkeys(list("".join(labels))))
+        self.length = len(labels)
         enumerated = list(enumerate(labels))
         flipped = [(sub[1], sub[0]) for sub in enumerated]
 
@@ -143,18 +143,19 @@ class Coder:
 coder = Coder(labels)
 encode = coder.encode
 decode = coder.decode
+vocab_size = coder.length
 
 
 # @torch.jit.script
 def process_datapoint(item):
-    waveform = item[0].to(device, non_blocking=non_blocking)
+    transformed = item[0].to(device, non_blocking=non_blocking)
     target = item[2]
     # pick first channel, apply mfcc, tranpose for pad_sequence
-    # specgram = mfcc(waveform)[0, ...].transpose(0, -1)
-    specgram = waveform[0, ...].view(1, -1).transpose(0, -1)
+    transformed = mfcc(transformed)
+    transformed = transformed[0, ...].transpose(0, -1)
     target = encode(target)
-    target = torch.tensor(target, dtype=torch.long, device=waveform.device)
-    return specgram, target
+    target = torch.tensor(target, dtype=torch.long, device=transformed.device)
+    return transformed, target
 
 
 def which_set(filename, validation_percentage, testing_percentage):
@@ -340,18 +341,20 @@ class Wav2Letter(nn.Module):
         log_probs = nn.functional.log_softmax(y_pred, dim=1)
         log_probs = log_probs.transpose(1, 2).transpose(0, 1)
 
+        # print(log_probs.shape)
         return log_probs
 
 
 class BiLSTM(nn.Module):
     def __init__(self, num_features, num_classes):
         super().__init__()
+        self.directions = 2
         # self.layers = nn.GRU(num_features, hidden_size, num_layers=3, batch_first=True, bidirectional=True)
         # self.layers = nn.LSTM(num_features, hidden_size, num_layers=num_layers, batch_first=True, bidirectional=True)
         # https://discuss.pytorch.org/t/lstm-to-bi-lstm/12967
         # self.lstm = nn.LSTM(num_features, hidden_size, num_layers=num_layers, batch_first=True, bidirectional=True)
         self.lstm = nn.LSTM(num_features, hidden_size, num_layers=num_layers, batch_first=True, bidirectional=True)
-        self.hidden2class = nn.Linear(2*hidden_size, num_classes)
+        self.hidden2class = nn.Linear(self.directions*hidden_size, num_classes)
         self.hidden = self.init_hidden()
 
     def init_hidden(self):
@@ -359,8 +362,8 @@ class BiLSTM(nn.Module):
         # Refer to the Pytorch documentation to see exactly
         # why they have this dimensionality.
         # The axes semantics are (num_layers * num_directions, minibatch_size, hidden_dim)
-        return (torch.autograd.Variable(torch.zeros(2*num_layers, batch_size, hidden_size)).to(device),
-                torch.autograd.Variable(torch.zeros(2*num_layers, batch_size, hidden_size)).to(device))
+        return (torch.autograd.Variable(torch.zeros(self.directions*num_layers, batch_size, hidden_size)).to(device),
+                torch.autograd.Variable(torch.zeros(self.directions*num_layers, batch_size, hidden_size)).to(device))
 
     def forward(self, inputs):
         inputs = inputs.transpose(-1, -2)
@@ -376,17 +379,41 @@ class BiLSTM(nn.Module):
         return log_probs
 
 
+def forward(inputs, targets):
+
+    inputs = inputs.to(device, non_blocking=non_blocking)
+    targets = targets.to(device, non_blocking=non_blocking)
+    outputs = model(inputs)
+
+    this_batch_size = len(inputs)
+    input_lengths = torch.full(
+        (this_batch_size,), outputs.shape[0], dtype=torch.long, device=outputs.device
+    )
+    target_lengths = torch.tensor(
+        [target.shape[0] for target in targets], dtype=torch.long, device=targets.device
+    )
+
+    # CTC
+    # https://pytorch.org/docs/master/nn.html#torch.nn.CTCLoss
+    # https://discuss.pytorch.org/t/ctcloss-with-warp-ctc-help/8788/3
+    # outputs: input length, batch size, number of classes (including blank)
+    # targets: batch size, max target length
+    # input_lengths: batch size
+    # target_lengths: batch size
+    return criterion(outputs, targets, input_lengths, target_lengths)
+
+
 def greedy_decoder(outputs):
     """Greedy Decoder. Returns highest probability of class labels for each timestep
 
     Args:
-        outputs (torch.Tensor): shape (1, num_classes, output_len)
+        outputs (torch.Tensor): shape (input length, batch size, number of classes (including blank))
 
     Returns:
         torch.Tensor: class labels per time step.
     """
-    _, indices = topk(outputs, k=1, dim=1)
-    return indices[:, 0, :]
+    _, indices = topk(outputs, k=1, dim=-1)
+    return indices[..., 0]
 
 
 loader_training = DataLoader(
@@ -398,8 +425,9 @@ loader_validation = DataLoader(
     num_workers=num_workers, pin_memory=pin_memory,
 )
 
-# model = Wav2Letter(n_mfcc, vocab_size)
-model = BiLSTM(1, vocab_size)
+model = Wav2Letter(n_mfcc, vocab_size)
+# model = BiLSTM(1, vocab_size)
+# model = BiLSTM(n_mfcc, vocab_size)
 
 # model = torch.jit.script(model)
 model = model.to(device, non_blocking=non_blocking)
@@ -416,34 +444,14 @@ for epoch in range(max_epoch):
     sum_loss = 0.
     for inputs, targets, _, _ in tqdm(loader_training):
 
-        inputs = inputs.to(device, non_blocking=non_blocking)
-        targets = targets.to(device, non_blocking=non_blocking)
-        outputs = model(inputs)
-
-        this_batch_size = len(inputs)
-        input_lengths = torch.full(
-            (this_batch_size,), outputs.shape[0], dtype=torch.long, device=outputs.device
-        )
-        target_lengths = torch.tensor(
-            [target.shape[0] for target in targets], dtype=torch.long, device=targets.device
-        )
-
-        # CTC
-        # https://pytorch.org/docs/master/nn.html#torch.nn.CTCLoss
-        # https://discuss.pytorch.org/t/ctcloss-with-warp-ctc-help/8788/3
-        # outputs: input length, batch size, number of classes (including blank)
-        # targets: batch size, max target length
-        # input_lengths: batch size
-        # target_lengths: batch size
-        loss = criterion(outputs, targets, input_lengths, target_lengths)
+        loss = forward(inputs, targets)
+        sum_loss += loss.item()
 
         optimizer.zero_grad()
         loss.backward()
         if clip_norm > 0:
             torch.nn.utils.clip_grad_norm_(model.parameters(), clip_norm)
         optimizer.step()
-
-        sum_loss += loss.item()
 
     # Average loss
     sum_loss_training = sum_loss / len(loader_training)
@@ -454,27 +462,8 @@ for epoch in range(max_epoch):
 
         sum_loss = 0.
         for inputs, targets, _, _ in loader_validation:
-            inputs = inputs.to(device, non_blocking=non_blocking)
-            targets = targets.to(device, non_blocking=non_blocking)
-            outputs = model(inputs)
 
-            this_batch_size = len(inputs)
-            input_lengths = torch.full(
-                (this_batch_size,), outputs.shape[0], dtype=torch.long, device=outputs.device
-            )
-            target_lengths = torch.tensor(
-                [target.shape[0] for target in targets], dtype=torch.long, device=targets.device
-            )
-
-            # CTC
-            # https://pytorch.org/docs/master/nn.html#torch.nn.CTCLoss
-            # https://discuss.pytorch.org/t/ctcloss-with-warp-ctc-help/8788/3
-            # outputs: input length, batch size, number of classes (including blank)
-            # targets: batch size, max target length
-            # input_lengths: batch size
-            # target_lengths: batch size
-            loss = criterion(outputs, targets, input_lengths, target_lengths)
-
+            loss = forward(inputs, targets)
             sum_loss += loss.item()
 
         # Average loss
@@ -494,17 +483,14 @@ torch.save(model.state_dict(), f"./model.{dtstamp}.{epoch}.ph")
 # Switch to evaluation mode
 model.eval()
 
-sample = inputs[0].unsqueeze(0).to(device, non_blocking=non_blocking)
-target = targets[0].to(device, non_blocking=non_blocking)
-
 print(targets[0])
-print(decode(targets[0].tolist()))
+print(decode(targets.tolist()[0]))
 
-output = model(sample)
+output = model(inputs)[:, 0, :]
 output = greedy_decoder(output)
 
 print(output)
-print(decode(output[0].tolist()))
+print(decode(output.tolist()))
 
 # Print performance
 pr.disable()
