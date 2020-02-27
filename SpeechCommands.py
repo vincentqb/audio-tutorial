@@ -294,9 +294,9 @@ def datasets():
     root = "./"
 
     training = PROCESSED_LIBRISPEECH(root, url="train-clean-100", download=True)
-    training = MemoryCache(training)
+    training = MapMemoryCache(training)
     validation = PROCESSED_LIBRISPEECH(root, url="dev-clean", download=True)
-    validation = MemoryCache(validation)
+    validation = MapMemoryCache(validation)
 
     return training, validation, None
 
@@ -305,11 +305,11 @@ def datasets():
     root = "./"
 
     training = PROCESSED_SPEECHCOMMANDS("training", root, download=True)
-    training = MemoryCache(training)
+    training = MapMemoryCache(training)
     validation = PROCESSED_SPEECHCOMMANDS("validation", root, download=True)
-    validation = MemoryCache(validation)
+    validation = MapMemoryCache(validation)
     testing = PROCESSED_SPEECHCOMMANDS("testing", root, download=True)
-    testing = MemoryCache(testing)
+    testing = MapMemoryCache(testing)
 
     return training, validation, testing
 
