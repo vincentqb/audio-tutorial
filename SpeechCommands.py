@@ -468,6 +468,7 @@ def greedy_decoder(outputs):
     return indices[..., 0]
 
 
+training, validation, _ = datasets()
 loader_training = DataLoader(
     training, batch_size=batch_size, collate_fn=collate_fn, shuffle=shuffle, drop_last=drop_last,
     num_workers=num_workers, pin_memory=pin_memory,
