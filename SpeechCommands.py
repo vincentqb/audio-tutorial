@@ -20,7 +20,7 @@ import torchaudio
 from torch import nn, topk
 from torch.optim import Adadelta
 from torch.utils.data import DataLoader
-from torchaudio.datasets import SPEECHCOMMANDS
+from torchaudio.datasets import SPEECHCOMMANDS, LIBRISPEECH
 from torchaudio.transforms import MFCC
 
 audio_backend = "soundfile"
@@ -247,6 +247,34 @@ class MemoryCache(torch.utils.data.Dataset):
 
     def __len__(self):
         return len(self.dataset)
+
+
+class PROCESSED_LIBRISPEECH(LIBRISPEECH):
+
+    def __getitem__(self, n):
+        try:
+            item = super().__getitem__(n)
+            return process_datapoint(item)
+        except (FileNotFoundError, RuntimeError):
+            return None
+
+    def __next__(self):
+        try:
+            item = super().__next__()
+            return process_datapoint(item)
+        except (FileNotFoundError, RuntimeError):
+            return self.__next__()
+
+
+def datasets():
+    root = "./"
+
+    training = PROCESSED_LIBRISPEECH(root, url="train-clean-100", download=True)
+    training = MemoryCache(training)
+    validation = PROCESSED_LIBRISPEECH(root, url="dev-clean", download=True)
+    validation = MemoryCache(validation)
+
+    return training, validation, None
 
 
 def datasets():
