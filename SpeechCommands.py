@@ -512,18 +512,39 @@ try:
 
         with torch.no_grad():
 
+            # Switch to evaluation mode
             model.eval()
+            output = model(inputs)[:, 0, :]
+            output = greedy_decoder(output)
+            target = decode(targets.tolist()[0])
+            print(output)
+            output = decode(output.tolist())
+            print(f"{epoch}: {target}, {output}")
 
-            sum_loss = 0.
-            for inputs, targets, _, _ in loader_validation:
+            if not epoch % mod_epoch:
 
-                loss = forward(inputs, targets)
-                sum_loss += loss.item()
+                model.eval()
 
-            # Average loss
-            sum_loss_validation = sum_loss / len(loader_validation)
+                sum_loss = 0.
+                for inputs, targets, _, _ in loader_validation:
 
-        print(f"{epoch}: {sum_loss_training:.5f}, {sum_loss_validation:.5f}")
+                    loss = forward(inputs, targets)
+                    sum_loss += loss.item()
+
+                # Average loss
+                sum_loss_validation = sum_loss / len(loader_validation)
+
+                # Switch to evaluation mode
+                model.eval()
+                output = model(inputs)[:, 0, :]
+                output = greedy_decoder(output)
+                target = decode(targets.tolist()[0])
+                output = decode(output.tolist())
+                print(f"{epoch}: {target}, {output}")
+
+                print(f"{epoch}: {sum_loss_training:.5f}, {sum_loss_validation:.5f}")
+            else:
+                print(f"{epoch}: {sum_loss_training:.5f}")
 
         if (loss < best_loss).all():
             # Save model
@@ -535,18 +556,6 @@ except KeyboardInterrupt:
 
 # Save model
 torch.save(model.state_dict(), f"./model.{dtstamp}.{epoch}.ph")
-
-# Switch to evaluation mode
-model.eval()
-
-print(targets[0])
-print(decode(targets.tolist()[0]))
-
-output = model(inputs)[:, 0, :]
-output = greedy_decoder(output)
-
-print(output)
-print(decode(output.tolist()))
 
 # Print performance
 pr.disable()
