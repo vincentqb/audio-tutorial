@@ -489,45 +489,49 @@ criterion = torch.nn.CTCLoss()
 
 best_loss = 1.
 
-for epoch in range(max_epoch):
+try:
 
-    model.train()
+    for epoch in range(max_epoch):
 
-    sum_loss = 0.
-    for inputs, targets, _, _ in tqdm(loader_training):
-
-        loss = forward(inputs, targets)
-        sum_loss += loss.item()
-
-        optimizer.zero_grad()
-        loss.backward()
-        if clip_norm > 0:
-            torch.nn.utils.clip_grad_norm_(model.parameters(), clip_norm)
-        optimizer.step()
-
-    # Average loss
-    sum_loss_training = sum_loss / len(loader_training)
-
-    with torch.no_grad():
-
-        model.eval()
+        model.train()
 
         sum_loss = 0.
-        for inputs, targets, _, _ in loader_validation:
+        for inputs, targets, _, _ in tqdm(loader_training):
 
             loss = forward(inputs, targets)
             sum_loss += loss.item()
 
+            optimizer.zero_grad()
+            loss.backward()
+            if clip_norm > 0:
+                torch.nn.utils.clip_grad_norm_(model.parameters(), clip_norm)
+            optimizer.step()
+
         # Average loss
-        sum_loss_validation = sum_loss / len(loader_validation)
+        sum_loss_training = sum_loss / len(loader_training)
 
-    print(f"{epoch}: {sum_loss_training:.5f}, {sum_loss_validation:.5f}")
+        with torch.no_grad():
 
-    if (loss < best_loss).all():
-        # Save model
-        torch.save(model.state_dict(), f"./model.{dtstamp}.{epoch}.ph")
-        best_loss = sum_loss
+            model.eval()
 
+            sum_loss = 0.
+            for inputs, targets, _, _ in loader_validation:
+
+                loss = forward(inputs, targets)
+                sum_loss += loss.item()
+
+            # Average loss
+            sum_loss_validation = sum_loss / len(loader_validation)
+
+        print(f"{epoch}: {sum_loss_training:.5f}, {sum_loss_validation:.5f}")
+
+        if (loss < best_loss).all():
+            # Save model
+            torch.save(model.state_dict(), f"./model.{dtstamp}.{epoch}.ph")
+            best_loss = sum_loss
+
+except KeyboardInterrupt:
+    pass
 
 # Save model
 torch.save(model.state_dict(), f"./model.{dtstamp}.{epoch}.ph")
