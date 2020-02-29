@@ -1,0 +1,15 @@
+name: torchaudio
+channels:
+  - anaconda
+  - pytorch
+dependencies:
+  - torchaudio
+  - jupyterlab
+  - notebook
+  - matplotlib
+  - dotfiles
+  - black
+  - pylint
+  - flake8
+  - isort
+  - neovim 
