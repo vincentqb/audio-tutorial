@@ -5,18 +5,22 @@
 
 import collections
 import cProfile
+import hashlib
+import itertools
+import os
 import pstats
-from io import StringIO
+import re
 from datetime import datetime
+from io import StringIO
+
+from tqdm import tqdm
 
 import torch
+import torchaudio
 from torch import nn, topk
 from torch.optim import Adadelta
 from torch.utils.data import DataLoader
-from tqdm import tqdm
-
-import torchaudio
-from torchaudio.datasets import SPEECHCOMMANDS
+from torchaudio.datasets import SPEECHCOMMANDS, LIBRISPEECH
 from torchaudio.transforms import MFCC
 
 audio_backend = "soundfile"
@@ -64,7 +68,8 @@ labels = [
         "yes",
         "zero",
 ]
-vocab_size = len(labels) + 2
+shuffle = False
+drop_last = True
 
 # audio, self.sr, window_stride=(160, 80), fft_size=512, num_filt=20, num_coeffs=13
 n_mfcc = 13
@@ -82,13 +87,26 @@ optimizer_params = {
     "rho": 0.95,
 }
 
+hidden_size = 8
+num_layers = 1
+
 max_epoch = 80
 clip_norm = 0.
 
+training_percentage = 10.
+validation_percentage = 5.
+MAX_NUM_WAVS_PER_CLASS = 2**27 - 1  # ~134M
+
 dtstamp = datetime.now().strftime("%y%m%d.%H%M%S")
+
+
+# Profiling performance
+pr = cProfile.Profile()
+pr.enable()
 
 torchaudio.set_audio_backend(audio_backend)
 mfcc = MFCC(sample_rate=sample_rate, n_mfcc=n_mfcc, melkwargs=melkwargs)
+mfcc.to(device)
 
 
 class Coder:
@@ -96,6 +114,7 @@ class Coder:
         self.max_length = max(map(len, labels))
 
         labels = list(collections.OrderedDict.fromkeys(list("".join(labels))))
+        self.length = len(labels)
         enumerated = list(enumerate(labels))
         flipped = [(sub[1], sub[0]) for sub in enumerated]
 
@@ -108,47 +127,108 @@ class Coder:
         iterable += [fillwith] * (self.max_length-len(iterable))  # add padding
         return iterable
 
-    def encode(self, iterable, device):
+    def encode(self, iterable):
         if isinstance(iterable[0], list):
-            return torch.stack([self.encode(i) for i in iterable])
+            return [self.encode(i) for i in iterable]
         else:
-            iterable = self._map_and_pad(iterable, self.mapping["*"])
-            return torch.tensor(iterable, dtype=torch.long, device=device)
+            return self._map_and_pad(iterable, self.mapping["*"])
 
     def decode(self, tensor):
-        if hasattr(tensor, "tolist"):
-            tensor = tensor.tolist()
         if isinstance(tensor[0], list):
             return [self.decode(t) for t in tensor]
         else:
-            return self._map_and_pad(tensor, self.mapping[1])
+            return "".join(self._map_and_pad(tensor, self.mapping[1]))
 
 
 coder = Coder(labels)
 encode = coder.encode
 decode = coder.decode
+vocab_size = coder.length
 
 
+# @torch.jit.script
 def process_datapoint(item):
-    waveform = item[0]
+    transformed = item[0].to(device, non_blocking=non_blocking)
     target = item[2]
     # pick first channel, apply mfcc, tranpose for pad_sequence
-    specgram = mfcc(waveform)[0, ...].transpose(0, -1)
-    target = encode(target, device=specgram.device)
-    return specgram, target
+    transformed = mfcc(transformed)
+    transformed = transformed[0, ...].transpose(0, -1)
+    target = encode(target)
+    target = torch.tensor(target, dtype=torch.long, device=transformed.device)
+    return transformed, target
 
 
-class PROCESSED_SPEECHCOMMANDS(SPEECHCOMMANDS):
+def which_set(filename, validation_percentage, testing_percentage):
+    """Determines which data partition the file should belong to.
+
+    We want to keep files in the same training, validation, or testing sets even
+    if new ones are added over time. This makes it less likely that testing
+    samples will accidentally be reused in training when long runs are restarted
+    for example. To keep this stability, a hash of the filename is taken and used
+    to determine which set it should belong to. This determination only depends on
+    the name and the set proportions, so it won't change as other files are added.
+
+    It's also useful to associate particular files as related (for example words
+    spoken by the same person), so anything after '_nohash_' in a filename is
+    ignored for set determination. This ensures that 'bobby_nohash_0.wav' and
+    'bobby_nohash_1.wav' are always in the same set, for example.
+
+    Args:
+        filename: File path of the data sample.
+        validation_percentage: How much of the data set to use for validation.
+        testing_percentage: How much of the data set to use for testing.
+
+    Returns:
+        String, one of 'training', 'validation', or 'testing'.
+    """
+    base_name = os.path.basename(filename)
+    # We want to ignore anything after '_nohash_' in the file name when
+    # deciding which set to put a wav in, so the data set creator has a way of
+    # grouping wavs that are close variations of each other.
+    hash_name = re.sub(r'_nohash_.*$', '', base_name).encode("utf-8")
+    # This looks a bit magical, but we need to decide whether this file should
+    # go into the training, testing, or validation sets, and we want to keep
+    # existing files in the same set even if more files are subsequently
+    # added.
+    # To do that, we need a stable way of deciding based on just the file name
+    # itself, so we do a hash of that and then use that to generate a
+    # probability value that we use to assign it.
+    hash_name_hashed = hashlib.sha1(hash_name).hexdigest()
+    percentage_hash = ((int(hash_name_hashed, 16) % (MAX_NUM_WAVS_PER_CLASS + 1)) * (100.0 / MAX_NUM_WAVS_PER_CLASS))
+    if percentage_hash < validation_percentage:
+        result = 'validation'
+    elif percentage_hash < (testing_percentage + validation_percentage):
+        result = 'testing'
+    else:
+        result = 'training'
+    return result
+
+
+class FILTERED_SPEECHCOMMANDS(SPEECHCOMMANDS):
+    def __init__(self, tag, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        if training_percentage < 100.:
+            testing_percentage = (100. - training_percentage - validation_percentage)
+            self._walker = list(filter(lambda x: which_set(x, validation_percentage, testing_percentage) == tag, self._walker))
+
+
+class PROCESSED_SPEECHCOMMANDS(FILTERED_SPEECHCOMMANDS):
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+
     def __getitem__(self, n):
-        return process_datapoint(super().__getitem__(n))
+        item = super().__getitem__(n)
+        return process_datapoint(item)
 
     def __next__(self):
-        return process_datapoint(super().__next__())
+        item = super().__next__()
+        return process_datapoint(item)
 
 
-class MemoryCache(torch.utils.data.Dataset):
+class MapMemoryCache(torch.utils.data.Dataset):
     """
-    Wrap a dataset so that, whenever a new item is returned, it is saved to disk.
+    Wrap a dataset so that, whenever a new item is returned, it is saved to memory.
     """
 
     def __init__(self, dataset):
@@ -169,30 +249,75 @@ class MemoryCache(torch.utils.data.Dataset):
         return len(self.dataset)
 
 
+class IterableMemoryCache:
+    def __init__(self, iterable):
+        self.iterable = iterable
+        self.iter = iter(iterable)
+        self.done = False
+        self.vals = []
+
+    def __iter__(self):
+        if self.done:
+            return iter(self.vals)
+        # chain vals so far & then gen the rest
+        return itertools.chain(self.vals, self._gen_iter())
+
+    def _gen_iter(self):
+        # gen new vals, appending as it goes
+        for new_val in self.iter:
+            self.vals.append(new_val)
+            yield new_val
+        self.done = True
+
+    def __len__(self):
+        return len(self.iterable)
+
+
+class PROCESSED_LIBRISPEECH(LIBRISPEECH):
+
+    def __getitem__(self, n):
+        try:
+            item = super().__getitem__(n)
+            return process_datapoint(item)
+        except (FileNotFoundError, RuntimeError):
+            return None
+
+    def __next__(self):
+        try:
+            item = super().__next__()
+            return process_datapoint(item)
+        except (FileNotFoundError, RuntimeError):
+            return self.__next__()
+
+
 def datasets():
     root = "./"
 
-    dataset = PROCESSED_SPEECHCOMMANDS(root, download=True)
-    dataset = MemoryCache(dataset)
-    # dataset = SPEECHCOMMANDS(root, download=download)
+    training = PROCESSED_LIBRISPEECH(root, url="train-clean-100", download=True)
+    training = MapMemoryCache(training)
+    validation = PROCESSED_LIBRISPEECH(root, url="dev-clean", download=True)
+    validation = MapMemoryCache(validation)
 
-    return dataset
+    return training, validation, None
+
+
+def datasets():
+    root = "./"
+
+    training = PROCESSED_SPEECHCOMMANDS("training", root, download=True)
+    training = MapMemoryCache(training)
+    validation = PROCESSED_SPEECHCOMMANDS("validation", root, download=True)
+    validation = MapMemoryCache(validation)
+    testing = PROCESSED_SPEECHCOMMANDS("testing", root, download=True)
+    testing = MapMemoryCache(testing)
+
+    return training, validation, testing
 
 
 def collate_fn(batch):
 
     tensors = [b[0] for b in batch if b]
     targets = [b[1] for b in batch if b]
-
-    # tensors = [process_waveform(b[0]) for b in batch if b]
-    # targets = [process_target(b[2]) for b in batch if b]
-
-    # truncate tensor list
-    # length = 2**10
-    # a = max(0, min([tensor.shape[-1] for tensor in tensors]) - length)
-    # m = randint(0, a)
-    # n = m + length
-    # tensors = [t[..., m:n] for t in tensors]
 
     input_lengths = [t.shape[0] for t in tensors]
     target_lengths = [len(t) for t in targets]
@@ -206,7 +331,7 @@ def collate_fn(batch):
 
 class PrintLayer(nn.Module):
     def __init__(self):
-        super(PrintLayer, self).__init__()
+        super().__init__()
 
     def forward(self, x):
         print(x)
@@ -224,7 +349,7 @@ class Wav2Letter(nn.Module):
     """
 
     def __init__(self, num_features, num_classes):
-        super(Wav2Letter, self).__init__()
+        super().__init__()
 
         # Conv1d(in_channels, out_channels, kernel_size, stride)
         self.layers = nn.Sequential(
@@ -239,12 +364,12 @@ class Wav2Letter(nn.Module):
             nn.ReLU(),
             nn.Conv1d(250, 250, 7),
             nn.ReLU(),
-            # nn.Conv1d(250, 250, 7),
-            # nn.ReLU(),
-            # nn.Conv1d(250, 250, 7),
-            # nn.ReLU(),
             nn.Conv1d(250, 250, 7),
             nn.ReLU(),
+            # nn.Conv1d(250, 250, 7),
+            # nn.ReLU(),
+            # nn.Conv1d(250, 250, 7),
+            # nn.ReLU(),
             nn.Conv1d(250, 2000, 32),
             nn.ReLU(),
             nn.Conv1d(2000, 2000, 1),
@@ -266,100 +391,172 @@ class Wav2Letter(nn.Module):
 
         # compute log softmax probability on graphemes
         log_probs = nn.functional.log_softmax(y_pred, dim=1)
+        log_probs = log_probs.transpose(1, 2).transpose(0, 1)
 
+        # print(log_probs.shape)
         return log_probs
+
+
+class BiLSTM(nn.Module):
+    def __init__(self, num_features, num_classes):
+        super().__init__()
+        self.directions = 2
+        # self.layers = nn.GRU(num_features, hidden_size, num_layers=3, batch_first=True, bidirectional=True)
+        # self.layers = nn.LSTM(num_features, hidden_size, num_layers=num_layers, batch_first=True, bidirectional=True)
+        # https://discuss.pytorch.org/t/lstm-to-bi-lstm/12967
+        # self.lstm = nn.LSTM(num_features, hidden_size, num_layers=num_layers, batch_first=True, bidirectional=True)
+        self.lstm = nn.LSTM(num_features, hidden_size, num_layers=num_layers, batch_first=True, bidirectional=True)
+        self.hidden2class = nn.Linear(self.directions*hidden_size, num_classes)
+        self.hidden = self.init_hidden()
+
+    def init_hidden(self):
+        # Before we've done anything, we dont have any hidden state.
+        # Refer to the Pytorch documentation to see exactly
+        # why they have this dimensionality.
+        # The axes semantics are (num_layers * num_directions, minibatch_size, hidden_dim)
+        return (torch.autograd.Variable(torch.zeros(self.directions*num_layers, batch_size, hidden_size)).to(device),
+                torch.autograd.Variable(torch.zeros(self.directions*num_layers, batch_size, hidden_size)).to(device))
+
+    def forward(self, inputs):
+        inputs = inputs.transpose(-1, -2)
+        # outputs, _ = self.layers(inputs)
+        # print(inputs.shape)
+        outputs, self.hidden = self.lstm(inputs, self.hidden)
+        self.hidden = (self.hidden[0].detach(), self.hidden[1].detach())
+        # outputs = outputs.view(batch_size, 2*hidden_size, -1)
+        outputs = self.hidden2class(outputs)
+
+        log_probs = nn.functional.log_softmax(outputs, dim=1)
+        log_probs = log_probs.transpose(0, 1)
+        return log_probs
+
+
+def forward(inputs, targets):
+
+    inputs = inputs.to(device, non_blocking=non_blocking)
+    targets = targets.to(device, non_blocking=non_blocking)
+    outputs = model(inputs)
+
+    this_batch_size = len(inputs)
+    input_lengths = torch.full(
+        (this_batch_size,), outputs.shape[0], dtype=torch.long, device=outputs.device
+    )
+    target_lengths = torch.tensor(
+        [target.shape[0] for target in targets], dtype=torch.long, device=targets.device
+    )
+
+    # CTC
+    # https://pytorch.org/docs/master/nn.html#torch.nn.CTCLoss
+    # https://discuss.pytorch.org/t/ctcloss-with-warp-ctc-help/8788/3
+    # outputs: input length, batch size, number of classes (including blank)
+    # targets: batch size, max target length
+    # input_lengths: batch size
+    # target_lengths: batch size
+    return criterion(outputs, targets, input_lengths, target_lengths)
 
 
 def greedy_decoder(outputs):
     """Greedy Decoder. Returns highest probability of class labels for each timestep
 
     Args:
-        outputs (torch.Tensor): shape (1, num_classes, output_len)
+        outputs (torch.Tensor): shape (input length, batch size, number of classes (including blank))
 
     Returns:
         torch.Tensor: class labels per time step.
     """
-    _, indices = topk(outputs, k=1, dim=1)
-    return indices[:, 0, :]
+    _, indices = topk(outputs, k=1, dim=-1)
+    return indices[..., 0]
 
 
-train = datasets()
-loader_train = DataLoader(
-    train, batch_size=batch_size, collate_fn=collate_fn, shuffle=True,
+training, validation, _ = datasets()
+loader_training = DataLoader(
+    training, batch_size=batch_size, collate_fn=collate_fn, shuffle=shuffle, drop_last=drop_last,
+    num_workers=num_workers, pin_memory=pin_memory,
+)
+loader_validation = DataLoader(
+    validation, batch_size=batch_size, collate_fn=collate_fn, shuffle=False, drop_last=drop_last,
     num_workers=num_workers, pin_memory=pin_memory,
 )
 
 model = Wav2Letter(n_mfcc, vocab_size)
-model = torch.jit.script(model)
+# model = BiLSTM(1, vocab_size)
+# model = BiLSTM(n_mfcc, vocab_size)
+
+# model = torch.jit.script(model)
 model = model.to(device, non_blocking=non_blocking)
 
 optimizer = Adadelta(model.parameters(), **optimizer_params)
 criterion = torch.nn.CTCLoss()
 
-# Profiling performance
-pr = cProfile.Profile()
-pr.enable()
-
 best_loss = 1.
 
-for epoch in range(max_epoch):
+try:
 
-    for inputs, targets, _, _ in tqdm(loader_train):
+    for epoch in range(max_epoch):
 
-        inputs = inputs.to(device, non_blocking=non_blocking)
-        targets = targets.to(device, non_blocking=non_blocking)
-        outputs = model(inputs)
-        outputs = outputs.transpose(1, 2).transpose(0, 1)
+        model.train()
 
-        this_batch_size = len(inputs)
+        sum_loss = 0.
+        for inputs, targets, _, _ in tqdm(loader_training):
 
-        input_lengths = torch.full(
-            (this_batch_size,), outputs.shape[0], dtype=torch.long, device=outputs.device
-        )
-        target_lengths = torch.tensor(
-            [target.shape[0] for target in targets], dtype=torch.long, device=targets.device
-        )
+            loss = forward(inputs, targets)
+            sum_loss += loss.item()
 
-        # CTC
-        # https://pytorch.org/docs/master/nn.html#torch.nn.CTCLoss
-        # https://discuss.pytorch.org/t/ctcloss-with-warp-ctc-help/8788/3
-        # outputs: input length, batch size, number of classes (including blank)
-        # targets: batch size, max target length
-        # input_lengths: batch size
-        # target_lengths: batch size
-        loss = criterion(outputs, targets, input_lengths, target_lengths)
+            optimizer.zero_grad()
+            loss.backward()
+            if clip_norm > 0:
+                torch.nn.utils.clip_grad_norm_(model.parameters(), clip_norm)
+            optimizer.step()
 
-        optimizer.zero_grad()
-        loss.backward()
-        if clip_norm > 0:
-            torch.nn.utils.clip_grad_norm_(model.parameters(), clip_norm)
-        optimizer.step()
+        # Average loss
+        sum_loss_training = sum_loss / len(loader_training)
 
-    print(epoch, loss)
+        with torch.no_grad():
 
-    if (loss < best_loss).all():
-        # Save model
-        torch.save(model.state_dict(), f"./model.{dtstamp}.{epoch}.ph")
-        best_loss = loss
+            # Switch to evaluation mode
+            model.eval()
+            output = model(inputs)[:, 0, :]
+            output = greedy_decoder(output)
+            target = decode(targets.tolist()[0])
+            print(output)
+            output = decode(output.tolist())
+            print(f"{epoch}: {target}, {output}")
 
+            if not epoch % mod_epoch:
+
+                model.eval()
+
+                sum_loss = 0.
+                for inputs, targets, _, _ in loader_validation:
+
+                    loss = forward(inputs, targets)
+                    sum_loss += loss.item()
+
+                # Average loss
+                sum_loss_validation = sum_loss / len(loader_validation)
+
+                # Switch to evaluation mode
+                model.eval()
+                output = model(inputs)[:, 0, :]
+                output = greedy_decoder(output)
+                target = decode(targets.tolist()[0])
+                output = decode(output.tolist())
+                print(f"{epoch}: {target}, {output}")
+
+                print(f"{epoch}: {sum_loss_training:.5f}, {sum_loss_validation:.5f}")
+            else:
+                print(f"{epoch}: {sum_loss_training:.5f}")
+
+        if (loss < best_loss).all():
+            # Save model
+            torch.save(model.state_dict(), f"./model.{dtstamp}.{epoch}.ph")
+            best_loss = sum_loss
+
+except KeyboardInterrupt:
+    pass
 
 # Save model
 torch.save(model.state_dict(), f"./model.{dtstamp}.{epoch}.ph")
-
-# Switch to evaluation mode
-model.eval()
-
-sample = inputs[0].unsqueeze(0).to(device, non_blocking=non_blocking)
-target = targets[0].to(device, non_blocking=non_blocking)
-
-print(targets[0])
-print(decode(targets[0]))
-
-output = model(sample)
-output = greedy_decoder(output)
-
-print(output)
-print(decode(output[0]))
 
 # Print performance
 pr.disable()
