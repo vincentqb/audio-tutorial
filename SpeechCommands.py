@@ -68,7 +68,8 @@ labels = [
         "yes",
         "zero",
 ]
-shuffle = False
+# vocab_size = len(labels) + 2
+shuffle = True
 drop_last = True
 
 # audio, self.sr, window_stride=(160, 80), fft_size=512, num_filt=20, num_coeffs=13
@@ -80,21 +81,24 @@ melkwargs = {
 }
 sample_rate = 16000
 
-batch_size = 512  # max number of sentences per batch
+batch_size = 1024  # max number of sentences per batch
 optimizer_params = {
     "lr": 1.0,
     "eps": 1e-8,
     "rho": 0.95,
 }
 
+# hidden_size = 128
+# num_layers = 3
 hidden_size = 8
 num_layers = 1
 
-max_epoch = 80
-clip_norm = 0.
+max_epoch = 200
+mod_epoch = 10
+clip_norm = 0.  # 10.
 
-training_percentage = 10.
-validation_percentage = 5.
+training_percentage = 80.
+validation_percentage = 10.
 MAX_NUM_WAVS_PER_CLASS = 2**27 - 1  # ~134M
 
 dtstamp = datetime.now().strftime("%y%m%d.%H%M%S")
@@ -153,6 +157,7 @@ def process_datapoint(item):
     # pick first channel, apply mfcc, tranpose for pad_sequence
     transformed = mfcc(transformed)
     transformed = transformed[0, ...].transpose(0, -1)
+    # transformed = transformed.view(-1, 1)
     target = encode(target)
     target = torch.tensor(target, dtype=torch.long, device=transformed.device)
     return transformed, target
@@ -319,14 +324,14 @@ def collate_fn(batch):
     tensors = [b[0] for b in batch if b]
     targets = [b[1] for b in batch if b]
 
-    input_lengths = [t.shape[0] for t in tensors]
-    target_lengths = [len(t) for t in targets]
+    # input_lengths = [t.shape[0] for t in tensors]
+    # target_lengths = [len(t) for t in targets]
 
     targets = torch.nn.utils.rnn.pad_sequence(targets, batch_first=True)
     tensors = torch.nn.utils.rnn.pad_sequence(tensors, batch_first=True)
     tensors = tensors.transpose(1, -1)
 
-    return tensors, targets, input_lengths, target_lengths
+    return tensors, targets  # , input_lengths, target_lengths
 
 
 class PrintLayer(nn.Module):
@@ -386,6 +391,7 @@ class Wav2Letter(nn.Module):
         Returns:
             Tensor with shape (batch_size, num_classes, output_len)
         """
+        # print(batch.shape)
         # y_pred shape (batch_size, num_classes, output_len)
         y_pred = self.layers(batch)
 
@@ -426,8 +432,10 @@ class BiLSTM(nn.Module):
         # outputs = outputs.view(batch_size, 2*hidden_size, -1)
         outputs = self.hidden2class(outputs)
 
+        # print(outputs.shape)
         log_probs = nn.functional.log_softmax(outputs, dim=1)
         log_probs = log_probs.transpose(0, 1)
+        # print(log_probs.shape)
         return log_probs
 
 
@@ -435,7 +443,10 @@ def forward(inputs, targets):
 
     inputs = inputs.to(device, non_blocking=non_blocking)
     targets = targets.to(device, non_blocking=non_blocking)
+    # print(inputs.shape)
+    # print(targets.shape)
     outputs = model(inputs)
+    # print(outputs.shape)
 
     this_batch_size = len(inputs)
     input_lengths = torch.full(
@@ -497,7 +508,7 @@ try:
         model.train()
 
         sum_loss = 0.
-        for inputs, targets, _, _ in tqdm(loader_training):
+        for inputs, targets in tqdm(loader_training):
 
             loss = forward(inputs, targets)
             sum_loss += loss.item()
@@ -527,7 +538,7 @@ try:
                 model.eval()
 
                 sum_loss = 0.
-                for inputs, targets, _, _ in loader_validation:
+                for inputs, targets in loader_validation:
 
                     loss = forward(inputs, targets)
                     sum_loss += loss.item()
