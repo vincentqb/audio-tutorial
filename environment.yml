@@ -4,7 +4,6 @@ channels:
   - pytorch
 dependencies:
   - torchaudio
-  - jupyterlab
   - notebook
   - matplotlib
   - dotfiles
