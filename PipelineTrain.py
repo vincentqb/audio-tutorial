@@ -362,7 +362,7 @@ def which_set(filename, validation_percentage, testing_percentage):
     if percentage_hash < validation_percentage:
         result = 'validation'
     elif percentage_hash < (testing_percentage + validation_percentage):
-        result = 'testing'gf
+        result = 'testing'
     else:
         result = 'training'
 
@@ -683,7 +683,7 @@ def batch_viterbi_decode(tag_sequence: torch.Tensor, transition_matrix: torch.Te
     return torch.tensor(outputs).transpose(0, -1), torch.cat(scores)
 
 
-def top_batch_viterbi_decode(tag_sequence: torch.Tensor)
+def top_batch_viterbi_decode(tag_sequence: torch.Tensor):
     output, _ = batch_viterbi_decode(output, transitions, k=1)
     return output[:, 0, :]
 
