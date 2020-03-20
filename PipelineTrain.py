@@ -65,10 +65,7 @@ num_devices = torch.cuda.device_count()
 print(num_devices, "GPUs")
 
 # max number of sentences per batch
-# batch_size = 2048
-# batch_size = 512
-# batch_size = 256
-batch_size = 64
+batch_size = args.batch_size
 
 training_percentage = 90.
 validation_percentage = 5.
