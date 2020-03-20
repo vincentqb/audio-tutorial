@@ -4,6 +4,7 @@
 # In[ ]:
 
 
+import argparse
 import collections
 import cProfile
 import hashlib
@@ -39,6 +40,17 @@ torch.cuda.empty_cache()
 # Profiling performance
 pr = cProfile.Profile()
 pr.enable()
+
+# Create argument parser
+parser = argparse.ArgumentParser(add_help=False, allow_abbrev=False)
+
+
+# In[ ]:
+
+
+parser.add_argument("--batch_size", default=None, type=int, default=64)
+
+args, _ = parser.parse_known_args()
 
 
 # In[ ]:
