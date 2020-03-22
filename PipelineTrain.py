@@ -59,6 +59,10 @@ args, _ = parser.parse_known_args()
 audio_backend = "soundfile"
 torchaudio.set_audio_backend(audio_backend)
 
+root = "/datasets01/"
+folder_in_archive="librispeech/062419/"
+
+
 device = "cuda" if torch.cuda.is_available() else "cpu"
 num_devices = torch.cuda.device_count()
 # num_devices = 1
@@ -222,7 +226,7 @@ class IterableMemoryCache:
         return itertools.chain(self._values, self._gen_iter())
 
     def _gen_iter(self):
-        for new_values in self._iter:
+        for new_value in self._iter:
             self._values.append(new_value)
             yield new_value
         self._done = True
@@ -309,9 +313,8 @@ def process_datapoint(item):
 
 def datasets():
 
-    root = "./"
     def create(tag):
-        data = LIBRISPEECH(root, tag, download=True)
+        data = LIBRISPEECH(root, tag, folder_in_archive=folder_in_archive, download=False)
         data = Processed(process_datapoint, data)
         data = MapMemoryCache(data)
         return data
@@ -320,110 +323,6 @@ def datasets():
 
 
 training, validation, _ = datasets()
-
-
-# In[ ]:
-
-
-def which_set(filename, validation_percentage, testing_percentage):
-    """Determines which data partition the file should belong to.
-
-    We want to keep files in the same training, validation, or testing sets even
-    if new ones are added over time. This makes it less likely that testing
-    samples will accidentally be reused in training when long runs are restarted
-    for example. To keep this stability, a hash of the filename is taken and used
-    to determine which set it should belong to. This determination only depends on
-    the name and the set proportions, so it won't change as other files are added.
-
-    It's also useful to associate particular files as related (for example words
-    spoken by the same person), so anything after '_nohash_' in a filename is
-    ignored for set determination. This ensures that 'bobby_nohash_0.wav' and
-    'bobby_nohash_1.wav' are always in the same set, for example.
-
-    Args:
-        filename: File path of the data sample.
-        validation_percentage: How much of the data set to use for validation.
-        testing_percentage: How much of the data set to use for testing.
-
-    Returns:
-        String, one of 'training', 'validation', or 'testing'.
-    """
-    
-    MAX_NUM_WAVS_PER_CLASS = 2**27 - 1  # ~134M
-
-    base_name = os.path.basename(filename)
-
-    # We want to ignore anything after '_nohash_' in the file name when
-    # deciding which set to put a wav in, so the data set creator has a way of
-    # grouping wavs that are close variations of each other.
-    hash_name = re.sub(r'_nohash_.*$', '', base_name).encode("utf-8")
-    
-    # This looks a bit magical, but we need to decide whether this file should
-    # go into the training, testing, or validation sets, and we want to keep
-    # existing files in the same set even if more files are subsequently
-    # added.
-    # To do that, we need a stable way of deciding based on just the file name
-    # itself, so we do a hash of that and then use that to generate a
-    # probability value that we use to assign it.
-    hash_name_hashed = hashlib.sha1(hash_name).hexdigest()
-    percentage_hash = ((int(hash_name_hashed, 16) % (MAX_NUM_WAVS_PER_CLASS + 1)) * (100.0 / MAX_NUM_WAVS_PER_CLASS))
-    
-    if percentage_hash < validation_percentage:
-        result = 'validation'
-    elif percentage_hash < (testing_percentage + validation_percentage):
-        result = 'testing'
-    else:
-        result = 'training'
-
-    return result
-
-
-def filter_speechcommands(tag, training_percentage, data):
-    if training_percentage < 100.:
-            testing_percentage = (100. - training_percentage - validation_percentage)
-            which_set_filter = lambda x: which_set(x, validation_percentage, testing_percentage) == tag
-            data._walker = list(filter(which_set_filter, data._walker))
-    return data
-
-
-def datasets():
-
-    root = "./"
-    def create(tag):
-        data = SPEECHCOMMANDS(root, download=True)
-        data = filter_speechcommands(tag, training_percentage, data)
-        data = Processed(process_datapoint, data)
-        data = MapMemoryCache(data)
-        return data
-
-    return create("training"), create("validation"), create("testing")
-
-
-# training, validation, _ = datasets()
-
-
-# In[ ]:
-
-
-if False:
-    
-    from collections import Counter
-    from collections import OrderedDict
-
-    training_unprocessed = SPEECHCOMMANDS("./", download=True)
-    training_unprocessed = filter_speechcommands(training_percentage, training_unprocessed)
-
-    counter = Counter([t[2] for t in training_unprocessed])
-    counter = OrderedDict(counter.most_common())
-
-    plt.bar(counter.keys(), counter.values(), align='center')
-
-    if resample is not None:
-        waveform, sample_rate = training_unprocessed[0][0], training_unprocessed[0][1]
-
-        fn = "sound.wav"
-        torchaudio.save(fn, waveform, sample_rate_new)
-        ipd.Audio(fn)
 
 
 # In[ ]:
@@ -693,7 +592,7 @@ def batch_viterbi_decode(tag_sequence: torch.Tensor, transition_matrix: torch.Te
 
 
 def top_batch_viterbi_decode(tag_sequence: torch.Tensor):
-    output, _ = batch_viterbi_decode(output, transitions, k=1)
+    output, _ = batch_viterbi_decode(tag_sequence, transitions, top_k=1)
     return output[:, 0, :]
 
 
