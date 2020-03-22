@@ -66,7 +66,7 @@ folder_in_archive="librispeech/062419/"
 device = "cuda" if torch.cuda.is_available() else "cpu"
 num_devices = torch.cuda.device_count()
 # num_devices = 1
-print(num_devices, "GPUs")
+print(num_devices, "GPUs", flush=True)
 
 # max number of sentences per batch
 batch_size = args.batch_size
@@ -162,7 +162,7 @@ max_epoch = 200
 mod_epoch = 10
 
 dtstamp = datetime.now().strftime("%y%m%d.%H%M%S")
-print(dtstamp)
+print(dtstamp, flush=True)
 
 
 # # Text encoding
@@ -204,7 +204,7 @@ coder = Coder(labels)
 encode = coder.encode
 decode = coder.decode
 vocab_size = coder.length
-print(vocab_size)
+print(vocab_size, flush=True)
 
 
 # # Dataset
@@ -340,8 +340,8 @@ def collate_fn(batch):
     )
     targets = torch.nn.utils.rnn.pad_sequence(targets, batch_first=True)
 
-    # print(targets.shape)
-    # print(decode(targets.tolist()))
+    # print(targets.shape, flush=True)
+    # print(decode(targets.tolist()), flush=True)
     
     return tensors, targets, target_lengths
 
@@ -367,7 +367,7 @@ class PrintLayer(nn.Module):
         super().__init__()
 
     def forward(self, x):
-        print(x)
+        print(x, flush=True)
         return x
     
 
@@ -444,17 +444,17 @@ class LSTMModel(nn.Module):
 
     def forward(self, batch):
         # self.layer.flatten_parameters()
-        # print("forward")
+        # print("forward", flush=True)
         # batch: batch, num_features, seq_len
-        # print(batch.shape)
+        # print(batch.shape, flush=True)
         batch = batch.transpose(-1, -2).contiguous()
         # batch: batch, seq_len, num_features
-        # print(batch.shape)
+        # print(batch.shape, flush=True)
         outputs, _ = self.layer(batch)
         # outputs: batch, seq_len, directions*num_features
         # outputs = self.hidden2class(outputs)
         # outputs: batch, seq_len, num_features
-        # print(outputs.shape)
+        # print(outputs.shape, flush=True)
         return nn.functional.log_softmax(outputs, dim=-1)    
 
 
@@ -636,10 +636,10 @@ loader_validation = DataLoader(
     validation, batch_size=batch_size, collate_fn=collate_fn, **data_loader_validation_params
 )
 
-print(len(loader_training), len(loader_validation))
+print(len(loader_training), len(loader_validation), flush=True)
 
 # num_features = next(iter(loader_training))[0].shape[1]
-# print(num_features)
+# print(num_features, flush=True)
 
 
 # In[ ]:
@@ -700,7 +700,7 @@ def forward_decode(output, targets, decoder):
     print_length = 20
     output_print = output[0].ljust(print_length)[:print_length]
     target_print = target[0].ljust(print_length)[:print_length]
-    print(f"Epoch: {epoch:4}   Target: {target_print}   Output: {output_print}")
+    print(f"Epoch: {epoch:4}   Target: {target_print}   Output: {output_print}", flush=True)
 
     cers = [levenshtein_distance(a, b) for a, b in zip(target, output)]
     cers = statistics.mean(cers)
@@ -710,7 +710,7 @@ def forward_decode(output, targets, decoder):
     wers = [levenshtein_distance(a, b) for a, b in zip(target, output)]
     wers = statistics.mean(wers)
     
-    print(f"Epoch: {epoch:4}   CER: {cers:1.5f}   WER: {wers:1.5f}")
+    print(f"Epoch: {epoch:4}   CER: {cers:1.5f}   WER: {wers:1.5f}", flush=True)
     
     return cers, wers
 
@@ -740,7 +740,7 @@ with tqdm(total=max_epoch, unit_scale=1) as pbar:
             if clip_norm > 0:
                 total_norm = torch.nn.utils.clip_grad_norm_(model.parameters(), clip_norm)
                 gradient_norm_training.append((epoch, total_norm))
-                print(f"Epoch: {epoch:4}   Gradient: {total_norm:4.5f}")
+                print(f"Epoch: {epoch:4}   Gradient: {total_norm:4.5f}", flush=True)
             optimizer.step()
 
             pbar.update(1/len(loader_training))
@@ -762,7 +762,7 @@ with tqdm(total=max_epoch, unit_scale=1) as pbar:
                     total_norm += p.grad.data.norm(2).item() ** 2                    
                 total_norm = total_norm ** (1. / 2)
                 gradient_norm.append(total_norm)
-                print(f"Epoch: {epoch:4}   Gradient: {total_norm}")
+                print(f"Epoch: {epoch:4}   Gradient: {total_norm}", flush=True)
                 
                 # Switch to evaluation mode
                 model.eval()
@@ -781,7 +781,7 @@ with tqdm(total=max_epoch, unit_scale=1) as pbar:
                 cer_validation.append((epoch, cer))
                 wer_validation.append((epoch, wer))
                 
-                print(sum_loss_str)
+                print(sum_loss_str, flush=True)
 
                 if sum_loss < best_loss:
                     # Save model
@@ -825,7 +825,7 @@ plt.legend()
 # In[ ]:
 
 
-# print(torch.cuda.memory_summary())
+# print(torch.cuda.memory_summary(), flush=True)
 
 
 # In[ ]:
@@ -838,5 +838,5 @@ torch.save(model.state_dict(), f"./model.{dtstamp}.{epoch}.ph")
 pr.disable()
 s = StringIO()
 ps = pstats.Stats(pr, stream=s).strip_dirs().sort_stats("cumtime").print_stats(20)
-print(s.getvalue())
+print(s.getvalue(), flush=True)
 
