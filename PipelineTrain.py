@@ -49,6 +49,10 @@ parser = argparse.ArgumentParser(add_help=False, allow_abbrev=False)
 
 
 parser.add_argument("--batch_size", type=int, default=64)
+parser.add_argument("--learning_rate", type=float, default=1.)
+parser.add_argument("--weight_decay", type=float, default=1e-5)
+parser.add_argument("--eps", type=float, default=1e-8)
+parser.add_argument("--rho", type=float, default=.95)
 
 args, _ = parser.parse_known_args()
 
@@ -60,8 +64,7 @@ audio_backend = "soundfile"
 torchaudio.set_audio_backend(audio_backend)
 
 root = "/datasets01/"
-folder_in_archive="librispeech/062419/"
-
+folder_in_archive = "librispeech/062419/"
 
 device = "cuda" if torch.cuda.is_available() else "cpu"
 num_devices = torch.cuda.device_count()
@@ -135,6 +138,13 @@ optimizer_params_adam = {
 optimizer_params_sgd = {
     "lr": .001,
     "weight_decay": .0001,
+}
+
+optimizer_params_adadelta = {
+    "lr": args.learning_rate,
+    "eps": args.eps,
+    "rho": args.rho,
+    "weight_decay": args.weight_decay,
 }
 
 Optimizer = Adadelta
