@@ -12,6 +12,7 @@ import itertools
 import math
 import os
 import pstats
+import signal
 import statistics
 import string
 import re
@@ -168,11 +169,90 @@ clip_norm = 0.  # 10.
 
 zero_infinity = False
 
+start_epoch = 0
 max_epoch = 200
 mod_epoch = 10
 
 dtstamp = datetime.now().strftime("%y%m%d.%H%M%S")
 print(dtstamp, flush=True)
+
+
+# # Checkpoint
+
+# In[25]:
+
+
+MAIN_PID = os.getpid()
+HALT_filename = 'HALT'
+CHECKPOINT_filename = 'checkpoint.pth.tar'
+# CHECKPOINT_filename = f'checkpoint.{dtstamp}.pth.tar'
+CHECKPOINT_tempfile = 'checkpoint.temp'
+SIGNAL_RECEIVED = False
+
+''' HALT file is used as a sign of job completion.
+Make sure no HALT file left from previous runs.
+'''
+if os.path.isfile(HALT_filename):
+    os.remove(HALT_filename)
+
+''' Remove CHECKPOINT_tempfile, in case the signal arrives in the
+middle of copying from CHECKPOINT_tempfile to CHECKPOINT_filename
+'''
+if os.path.isfile(CHECKPOINT_tempfile):
+    os.remove(CHECKPOINT_tempfile)
+
+
+def SIGTERM_handler(a, b):
+    print('received sigterm')
+    pass
+
+
+def signal_handler(a, b):
+    global SIGNAL_RECEIVED
+    print('Signal received', a, time.time(), flush=True)
+    SIGNAL_RECEIVED = True
+
+    ''' If HALT file exists, which means the job is done, exit peacefully.
+    '''
+    if os.path.isfile(HALT_filename):
+        print('Job is done, exiting')
+        exit(0)
+
+    return
+
+def trigger_job_requeue():
+    ''' Submit a new job to resume from checkpoint.
+    '''
+    if os.path.isfile(CHECKPOINT_filename) and os.getpid() == MAIN_PID:
+        print('pid: ', os.getpid(), ' ppid: ', os.getppid(), flush=True)
+        print('time is up, back to slurm queue', flush=True)
+        command = 'scontrol requeue ' + os.environ['SLURM_JOB_ID']
+        print(command)
+        if os.system(command):
+            raise RuntimeError('requeue failed')
+        print('New job submitted to the queue', flush=True)
+    exit(0)
+
+
+''' Install signal handler
+'''
+signal.signal(signal.SIGUSR1, signal_handler)
+signal.signal(signal.SIGTERM, SIGTERM_handler)
+print('Signal handler installed', flush=True)
+
+
+def save_checkpoint(state, is_best, filename='checkpoint.pth.tar'):
+    ''' Save the model to a temporary file first,
+    then copy it to filename, in case the signal interrupts
+    the torch.save() process.
+    '''
+    # if os.environ['SLURM_PROCID'] == '0':
+    torch.save(state, CHECKPOINT_tempfile)
+    if os.path.isfile(CHECKPOINT_tempfile):
+        os.rename(CHECKPOINT_tempfile, filename)
+    if is_best:
+        shutil.copyfile(filename, 'model_best.pth.tar')
+    print("Checkpoint done")
 
 
 # # Text encoding
@@ -681,7 +761,7 @@ model = model.to(device, non_blocking=non_blocking)
 # model.apply(weight_init)
 
 optimizer = Optimizer(model.parameters(), **optimizer_params)
-# scheduler = ExponentialLR(optimizer, gamma=gamma)
+scheduler = ExponentialLR(optimizer, gamma=gamma)
 # scheduler = ReduceLROnPlateau(optimizer)
 
 criterion = torch.nn.CTCLoss(zero_infinity=zero_infinity)
@@ -760,6 +840,28 @@ def forward_decode(output, targets, decoder):
     return cers, wers
 
 
+# In[26]:
+
+
+if os.path.isfile(CHECKPOINT_filename):
+    print("=> loading checkpoint '{}'".format(CHECKPOINT_filename))
+    checkpoint = torch.load(CHECKPOINT_filename)
+    start_epoch = checkpoint['epoch']
+    best_loss = checkpoint['best_loss']
+    model.load_state_dict(checkpoint['state_dict'])
+    optimizer.load_state_dict(checkpoint['optimizer'])
+    print("=> loaded checkpoint '{}' (epoch {})".format(CHECKPOINT_filename, checkpoint['epoch']))
+else:
+    print("=> no checkpoint found")
+    save_checkpoint({
+        'epoch': start_epoch,
+        'state_dict': model.state_dict(),
+        'best_loss': best_loss,
+        'optimizer': optimizer.state_dict(),
+        'scheduler': scheduler.state_dict(),
+    }, False)
+
+
 # In[ ]:
 
 
@@ -771,7 +873,7 @@ cer_validation = []
 wer_validation = []
 
 with tqdm(total=max_epoch, unit_scale=1) as pbar:
-    for epoch in range(max_epoch):
+    for epoch in range(start_epoch, max_epoch):
         model.train()
 
         sum_loss = 0.
@@ -789,6 +891,18 @@ with tqdm(total=max_epoch, unit_scale=1) as pbar:
             optimizer.step()
 
             pbar.update(1/len(loader_training))
+            
+            if SIGNAL_RECEIVED:
+                
+                save_checkpoint({
+                    'epoch': epoch,
+                    'state_dict': model.state_dict(),
+                    'best_loss': best_loss,
+                    'optimizer': optimizer.state_dict(),
+                    'scheduler': scheduler.state_dict(),
+                }, False)
+                
+                trigger_job_requeue()
 
         # Average loss
         sum_loss = sum_loss / len(loader_training)
@@ -815,6 +929,9 @@ with tqdm(total=max_epoch, unit_scale=1) as pbar:
                 sum_loss = 0.
                 for inputs, targets, tensors_lengths, target_lengths in loader_validation:
                     sum_loss += forward_and_loss(inputs, targets, tensors_lengths, target_lengths).item()
+                    
+                    if SIGNAL_RECEIVED:
+                        break
 
                 # Average loss
                 sum_loss = sum_loss / len(loader_validation)
@@ -828,10 +945,20 @@ with tqdm(total=max_epoch, unit_scale=1) as pbar:
                 
                 print(sum_loss_str, flush=True)
 
-                if sum_loss < best_loss:
-                    # Save model
-                    torch.save(model.state_dict(), f"./model.{dtstamp}.{epoch}.ph")
-                    best_loss = sum_loss
+                is_best = sum_loss < best_loss
+                best_loss = min(sum_loss, best_loss)
+                save_checkpoint({
+                    'epoch': epoch + 1,
+                    'state_dict': model.state_dict(),
+                    'best_loss': best_loss,
+                    'optimizer': optimizer.state_dict(),
+                    'scheduler': scheduler.state_dict(),
+                }, is_best)
+                
+        ''' Create an empty file HALT_filename, mark the job as finished
+        '''
+        if epoch == max_epoch - 1:
+            open(HALT_filename, 'a').close()
 
 
 # In[ ]:
@@ -870,14 +997,20 @@ plt.legend()
 # In[ ]:
 
 
-# print(torch.cuda.memory_summary(), flush=True)
+print(cer_validation, flush=True)
+print(wer_validation, flush=True)
+print(sum_loss_training, flush=True)
+print(sum_loss_validation, flush=True)
 
 
 # In[ ]:
 
 
-# Save model
-torch.save(model.state_dict(), f"./model.{dtstamp}.{epoch}.ph")
+# print(torch.cuda.memory_summary(), flush=True)
+
+
+# In[ ]:
+
 
 # Print performance
 pr.disable()
