@@ -338,22 +338,10 @@ training, validation, _ = datasets()
 # In[ ]:
 
 
-def collate_fn(batch):
 
-    tensors = [b[0] for b in batch if b]
-    tensors = torch.nn.utils.rnn.pad_sequence(tensors, batch_first=True)
-    tensors = tensors.transpose(1, -1)
 
-    targets = [b[1] for b in batch if b]
-    target_lengths = torch.tensor(
-        [target.shape[0] for target in targets], dtype=torch.long, device=tensors.device
-    )
-    targets = torch.nn.utils.rnn.pad_sequence(targets, batch_first=True)
 
-    # print(targets.shape, flush=True)
-    # print(decode(targets.tolist()), flush=True)
     
-    return tensors, targets, target_lengths
 
 
 # # Model
@@ -489,27 +477,33 @@ def greedy_decode(outputs):
 # In[ ]:
 
 
-from collections import Counter
+def build_transitions():
 
-c = None
+    from collections import Counter
 
-for _, label in training:
-    # Count bigrams
-    count = [((a.item(), b.item())) for (a,b) in zip(label, label[1:])]
-    count = Counter(count)
-    if c is None:
-        c = count
-    else:
-        c = c + count
+    c = None
 
-# Encode as transition matrix
+    for _, label in training:
+        # Count bigrams
+        count = [((a.item(), b.item())) for (a,b) in zip(label, label[1:])]
+        count = Counter(count)
+        if c is None:
+            c = count
+        else:
+            c = c + count
 
-ind = torch.tensor(list(zip(*[a for (a,b) in c.items()])))
-val = torch.tensor([b for (a,b) in c.items()], dtype=torch.float)
+    # Encode as transition matrix
 
-transitions = torch.sparse_coo_tensor(indices=ind, values=val, size=[vocab_size,vocab_size]).coalesce().to_dense()
-transitions = (transitions/torch.max(torch.tensor(1.), transitions.max(dim=1)[0]).unsqueeze(1))
+    ind = torch.tensor(list(zip(*[a for (a,b) in c.items()])))
+    val = torch.tensor([b for (a,b) in c.items()], dtype=torch.float)
 
+    transitions = torch.sparse_coo_tensor(indices=ind, values=val, size=[vocab_size,vocab_size]).coalesce().to_dense()
+    transitions = (transitions/torch.max(torch.tensor(1.), transitions.max(dim=1)[0]).unsqueeze(1))
+    
+    return transitions
+    
+
+transitions = build_transitions()
 
 # In[ ]:
 
@@ -638,25 +632,48 @@ def levenshtein_distance(r, h):
 # In[ ]:
 
 
-loader_training = DataLoader(
-    training, batch_size=batch_size, collate_fn=collate_fn, **data_loader_training_params
-)
-
-loader_validation = DataLoader(
-    validation, batch_size=batch_size, collate_fn=collate_fn, **data_loader_validation_params
-)
-
-print(len(loader_training), len(loader_validation), flush=True)
-
-# num_features = next(iter(loader_training))[0].shape[1]
-# print(num_features, flush=True)
-
-
-# In[ ]:
-
-
 model = Wav2Letter(num_features, vocab_size)
 # model = LSTMModel(num_features, vocab_size, **lstm_params)
+
+
+# In[29]:
+
+
+shape_after_model = {}
+
+
+def collate_fn(batch):
+    
+    tensors = [b[0] for b in batch if b]
+    
+    for tensor in tensors:
+        shape = int(tensor.shape[0])
+        if shape not in shape_after_model:
+            tensor = tensor.t().unsqueeze(0)
+            output = model(tensor)
+            shape_after_model[shape] = int(output.shape[1])
+
+    tensors_lengths = torch.tensor(
+        [shape_after_model[int(t.shape[0])] for t in tensors], dtype=torch.long, device=tensors[0].device
+    )
+    
+    tensors = torch.nn.utils.rnn.pad_sequence(tensors, batch_first=True)
+    tensors = tensors.transpose(1, -1)
+    
+    targets = [b[1] for b in batch if b]
+    target_lengths = torch.tensor(
+        [target.shape[0] for target in targets], dtype=torch.long, device=tensors.device
+    )
+    targets = torch.nn.utils.rnn.pad_sequence(targets, batch_first=True)
+
+    # print(targets.shape, flush=True)
+    # print(decode(targets.tolist()), flush=True)
+    
+    return tensors, targets, tensors_lengths, target_lengths
+
+
+# In[30]:
+
 
 model = torch.jit.script(model)
 model = nn.DataParallel(model) if num_devices > 1 else model
@@ -674,10 +691,27 @@ criterion = torch.nn.CTCLoss(zero_infinity=zero_infinity)
 best_loss = 1.
 
 
-# In[ ]:
+# In[31]:
 
 
-def forward_and_loss(inputs, targets, target_lengths):
+loader_training = DataLoader(
+    training, batch_size=batch_size, collate_fn=collate_fn, **data_loader_training_params
+)
+
+loader_validation = DataLoader(
+    validation, batch_size=batch_size, collate_fn=collate_fn, **data_loader_validation_params
+)
+
+print(len(loader_training), len(loader_validation), flush=True)
+
+# num_features = next(iter(loader_training))[0].shape[1]
+# print(num_features, flush=True)
+
+
+# In[32]:
+
+
+def forward_and_loss(inputs, targets, tensors_lengths, target_lengths):
 
     inputs = inputs.to(device, non_blocking=non_blocking)
     targets = targets.to(device, non_blocking=non_blocking)
@@ -687,7 +721,8 @@ def forward_and_loss(inputs, targets, target_lengths):
 
     this_batch_size = outputs.shape[1]
     seq_len = outputs.shape[0]
-    input_lengths = torch.full((this_batch_size,), seq_len, dtype=torch.long, device=outputs.device)
+    # input_lengths = torch.full((this_batch_size,), seq_len, dtype=torch.long, device=outputs.device)
+    input_lengths = tensors_lengths
     
     # CTC    
     # outputs: input length, batch size, number of classes (including blank)
@@ -740,9 +775,9 @@ with tqdm(total=max_epoch, unit_scale=1) as pbar:
         model.train()
 
         sum_loss = 0.
-        for inputs, targets, target_lengths in loader_training:
+        for inputs, targets, tensors_lengths, target_lengths in loader_training:
 
-            loss = forward_and_loss(inputs, targets, target_lengths)
+            loss = forward_and_loss(inputs, targets, tensors_lengths, target_lengths)
             sum_loss += loss.item()
 
             optimizer.zero_grad()
@@ -778,8 +813,8 @@ with tqdm(total=max_epoch, unit_scale=1) as pbar:
                 model.eval()
         
                 sum_loss = 0.
-                for inputs, targets, target_lengths in loader_validation:
-                    sum_loss += forward_and_loss(inputs, targets, target_lengths).item()
+                for inputs, targets, tensors_lengths, target_lengths in loader_validation:
+                    sum_loss += forward_and_loss(inputs, targets, tensors_lengths, target_lengths).item()
 
                 # Average loss
                 sum_loss = sum_loss / len(loader_validation)
