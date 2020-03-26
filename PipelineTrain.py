@@ -13,6 +13,7 @@ import math
 import os
 import pstats
 import signal
+import shutil
 import statistics
 import string
 import re
@@ -31,8 +32,8 @@ from torchaudio.datasets import SPEECHCOMMANDS, LIBRISPEECH
 from torchaudio.transforms import MFCC, Resample
 
 import matplotlib
-# get_ipython().run_line_magic('matplotlib', 'inline')
-matplotlib.use("Agg")
+get_ipython().run_line_magic('matplotlib', 'inline')
+# matplotlib.use("Agg")
 from matplotlib import pyplot as plt
 
 # Empty CUDA cache
@@ -54,6 +55,7 @@ parser.add_argument("--learning_rate", type=float, default=1.)
 parser.add_argument("--weight_decay", type=float, default=1e-5)
 parser.add_argument("--eps", type=float, default=1e-8)
 parser.add_argument("--rho", type=float, default=.95)
+parser.add_argument('--checkpoint', default='checkpoint.pth.tar', type=str)
 
 args, _ = parser.parse_known_args()
 
@@ -73,6 +75,10 @@ num_devices = torch.cuda.device_count()
 print(num_devices, "GPUs", flush=True)
 
 # max number of sentences per batch
+# batch_size = 2048
+# batch_size = 512
+# batch_size = 256
+# batch_size = 64
 batch_size = args.batch_size
 
 training_percentage = 90.
@@ -179,14 +185,13 @@ print(dtstamp, flush=True)
 
 # # Checkpoint
 
-# In[25]:
+# In[ ]:
 
 
 MAIN_PID = os.getpid()
-HALT_filename = 'HALT'
-CHECKPOINT_filename = 'checkpoint.pth.tar'
-# CHECKPOINT_filename = f'checkpoint.{dtstamp}.pth.tar'
-CHECKPOINT_tempfile = 'checkpoint.temp'
+CHECKPOINT_filename = args.checkpoint
+CHECKPOINT_tempfile = CHECKPOINT_filename + '.temp'
+HALT_filename = CHECKPOINT_filename + '.HALT'
 SIGNAL_RECEIVED = False
 
 ''' HALT file is used as a sign of job completion.
@@ -209,7 +214,7 @@ def SIGTERM_handler(a, b):
 
 def signal_handler(a, b):
     global SIGNAL_RECEIVED
-    print('Signal received', a, time.time(), flush=True)
+    print('Signal received', a, datetime.now().strftime("%y%m%d.%H%M%S"), flush=True)
     SIGNAL_RECEIVED = True
 
     ''' If HALT file exists, which means the job is done, exit peacefully.
@@ -219,6 +224,7 @@ def signal_handler(a, b):
         exit(0)
 
     return
+
 
 def trigger_job_requeue():
     ''' Submit a new job to resume from checkpoint.
@@ -241,7 +247,7 @@ signal.signal(signal.SIGTERM, SIGTERM_handler)
 print('Signal handler installed', flush=True)
 
 
-def save_checkpoint(state, is_best, filename='checkpoint.pth.tar'):
+def save_checkpoint(state, is_best, filename=CHECKPOINT_filename):
     ''' Save the model to a temporary file first,
     then copy it to filename, in case the signal interrupts
     the torch.save() process.
@@ -418,10 +424,105 @@ training, validation, _ = datasets()
 # In[ ]:
 
 
+def which_set(filename, validation_percentage, testing_percentage):
+    """Determines which data partition the file should belong to.
 
+    We want to keep files in the same training, validation, or testing sets even
+    if new ones are added over time. This makes it less likely that testing
+    samples will accidentally be reused in training when long runs are restarted
+    for example. To keep this stability, a hash of the filename is taken and used
+    to determine which set it should belong to. This determination only depends on
+    the name and the set proportions, so it won't change as other files are added.
 
+    It's also useful to associate particular files as related (for example words
+    spoken by the same person), so anything after '_nohash_' in a filename is
+    ignored for set determination. This ensures that 'bobby_nohash_0.wav' and
+    'bobby_nohash_1.wav' are always in the same set, for example.
 
+    Args:
+        filename: File path of the data sample.
+        validation_percentage: How much of the data set to use for validation.
+        testing_percentage: How much of the data set to use for testing.
+
+    Returns:
+        String, one of 'training', 'validation', or 'testing'.
+    """
     
+    MAX_NUM_WAVS_PER_CLASS = 2**27 - 1  # ~134M
+
+    base_name = os.path.basename(filename)
+
+    # We want to ignore anything after '_nohash_' in the file name when
+    # deciding which set to put a wav in, so the data set creator has a way of
+    # grouping wavs that are close variations of each other.
+    hash_name = re.sub(r'_nohash_.*$', '', base_name).encode("utf-8")
+    
+    # This looks a bit magical, but we need to decide whether this file should
+    # go into the training, testing, or validation sets, and we want to keep
+    # existing files in the same set even if more files are subsequently
+    # added.
+    # To do that, we need a stable way of deciding based on just the file name
+    # itself, so we do a hash of that and then use that to generate a
+    # probability value that we use to assign it.
+    hash_name_hashed = hashlib.sha1(hash_name).hexdigest()
+    percentage_hash = ((int(hash_name_hashed, 16) % (MAX_NUM_WAVS_PER_CLASS + 1)) * (100.0 / MAX_NUM_WAVS_PER_CLASS))
+    
+    if percentage_hash < validation_percentage:
+        result = 'validation'
+    elif percentage_hash < (testing_percentage + validation_percentage):
+        result = 'testing'
+    else:
+        result = 'training'
+
+    return result
+
+
+def filter_speechcommands(tag, training_percentage, data):
+    if training_percentage < 100.:
+        testing_percentage = (100. - training_percentage - validation_percentage)
+        which_set_filter = lambda x: which_set(x, validation_percentage, testing_percentage) == tag
+        data._walker = list(filter(which_set_filter, data._walker))
+    return data
+
+
+def datasets():
+
+    root = "./"
+    def create(tag):
+        data = SPEECHCOMMANDS(root, download=True)
+        data = filter_speechcommands(tag, training_percentage, data)
+        data = Processed(process_datapoint, data)
+        data = MapMemoryCache(data)
+        return data
+
+    return create("training"), create("validation"), create("testing")
+
+
+# training, validation, _ = datasets()
+
+
+# In[ ]:
+
+
+if False:
+    
+    from collections import Counter
+    from collections import OrderedDict
+
+    training_unprocessed = SPEECHCOMMANDS("./", download=True)
+    training_unprocessed = filter_speechcommands(training_percentage, training_unprocessed)
+
+    counter = Counter([t[2] for t in training_unprocessed])
+    counter = OrderedDict(counter.most_common())
+
+    plt.bar(counter.keys(), counter.values(), align='center')
+
+    if resample is not None:
+        waveform, sample_rate = training_unprocessed[0][0], training_unprocessed[0][1]
+
+        fn = "sound.wav"
+        torchaudio.save(fn, waveform, sample_rate_new)
+        ipd.Audio(fn)
 
 
 # # Model
@@ -434,8 +535,8 @@ training, validation, _ = datasets()
 def weight_init(m): 
     if isinstance(m, nn.Linear):
         size = m.weight.size()
-        fan_out = size[0] # number of rows
-        fan_in = size[1] # number of columns
+        fan_out = size[0]  # number of rows
+        fan_in = size[1]  # number of columns
         variance = math.sqrt(2.0/(fan_in + fan_out))
         m.weight.data.normal_(0.0, variance)
 
@@ -585,6 +686,7 @@ def build_transitions():
 
 transitions = build_transitions()
 
+
 # In[ ]:
 
 
@@ -716,7 +818,7 @@ model = Wav2Letter(num_features, vocab_size)
 # model = LSTMModel(num_features, vocab_size, **lstm_params)
 
 
-# In[29]:
+# In[ ]:
 
 
 shape_after_model = {}
@@ -752,7 +854,7 @@ def collate_fn(batch):
     return tensors, targets, tensors_lengths, target_lengths
 
 
-# In[30]:
+# In[ ]:
 
 
 model = torch.jit.script(model)
@@ -771,7 +873,7 @@ criterion = torch.nn.CTCLoss(zero_infinity=zero_infinity)
 best_loss = 1.
 
 
-# In[31]:
+# In[ ]:
 
 
 loader_training = DataLoader(
@@ -788,7 +890,7 @@ print(len(loader_training), len(loader_validation), flush=True)
 # print(num_features, flush=True)
 
 
-# In[32]:
+# In[ ]:
 
 
 def forward_and_loss(inputs, targets, tensors_lengths, target_lengths):
@@ -840,7 +942,7 @@ def forward_decode(output, targets, decoder):
     return cers, wers
 
 
-# In[26]:
+# In[ ]:
 
 
 if os.path.isfile(CHECKPOINT_filename):
