@@ -12,29 +12,28 @@ import itertools
 import math
 import os
 import pstats
-import signal
+import re
 import shutil
+import signal
 import statistics
 import string
-import re
-
 from datetime import datetime
 from io import StringIO
-from tqdm.notebook import tqdm as tqdm
-
-import torch
-import torchaudio
-from torch import nn, topk
-from torch.optim import Adadelta, Adam, SGD
-from torch.optim.lr_scheduler import ExponentialLR, ReduceLROnPlateau
-from torch.utils.data import DataLoader
-from torchaudio.datasets import SPEECHCOMMANDS, LIBRISPEECH
-from torchaudio.transforms import MFCC, Resample
 
 import matplotlib
-get_ipython().run_line_magic('matplotlib', 'inline')
-# matplotlib.use("Agg")
+import torch
+import torchaudio
 from matplotlib import pyplot as plt
+from torch import nn, topk
+from torch.optim import SGD, Adadelta, Adam
+from torch.optim.lr_scheduler import ExponentialLR, ReduceLROnPlateau
+from torch.utils.data import DataLoader
+from torchaudio.datasets import LIBRISPEECH, SPEECHCOMMANDS
+from torchaudio.transforms import MFCC, Resample
+from tqdm.notebook import tqdm as tqdm
+
+# matplotlib.use("Agg")
+get_ipython().run_line_magic('matplotlib', 'inline')
 
 # Empty CUDA cache
 torch.cuda.empty_cache()
@@ -123,7 +122,8 @@ melkwargs = {
     'n_mels': 20,
     'hop_length': 80,  # (160, 80)
 }
-mfcc = MFCC(sample_rate=sample_rate_original, n_mfcc=n_mfcc, melkwargs=melkwargs).to(device)
+mfcc = MFCC(sample_rate=sample_rate_original,
+            n_mfcc=n_mfcc, melkwargs=melkwargs).to(device)
 # mfcc = None
 
 
@@ -214,7 +214,8 @@ def SIGTERM_handler(a, b):
 
 def signal_handler(a, b):
     global SIGNAL_RECEIVED
-    print('Signal received', a, datetime.now().strftime("%y%m%d.%H%M%S"), flush=True)
+    print('Signal received', a, datetime.now().strftime(
+        "%y%m%d.%H%M%S"), flush=True)
     SIGNAL_RECEIVED = True
 
     ''' If HALT file exists, which means the job is done, exit peacefully.
@@ -358,7 +359,7 @@ class Processed(torch.utils.data.Dataset):
     def __init__(self, process_datapoint, dataset):
         self.process_datapoint = process_datapoint
         self.dataset = dataset
-        
+
     def __getitem__(self, n):
         try:
             item = self.dataset[n]
@@ -372,7 +373,7 @@ class Processed(torch.utils.data.Dataset):
             return self.process_datapoint(item)
         except (FileNotFoundError, RuntimeError):
             return self.__next__()
-        
+
     def __len__(self):
         return len(self.dataset)
 
@@ -388,14 +389,14 @@ def process_datapoint(item):
     # apply mfcc, tranpose for pad_sequence
     if resample is not None:
         transformed = resample(transformed)
-    
+
     if mfcc is not None:
         transformed = mfcc(transformed)
     else:
         transformed = transformed.unsqueeze(1)
-    
+
     transformed = transformed[0, ...].transpose(0, -1)
-    
+
     target = encode(target)
     target = torch.tensor(target, dtype=torch.long, device=transformed.device)
 
@@ -410,7 +411,8 @@ def process_datapoint(item):
 def datasets():
 
     def create(tag):
-        data = LIBRISPEECH(root, tag, folder_in_archive=folder_in_archive, download=False)
+        data = LIBRISPEECH(
+            root, tag, folder_in_archive=folder_in_archive, download=False)
         data = Processed(process_datapoint, data)
         data = MapMemoryCache(data)
         return data
@@ -447,7 +449,7 @@ def which_set(filename, validation_percentage, testing_percentage):
     Returns:
         String, one of 'training', 'validation', or 'testing'.
     """
-    
+
     MAX_NUM_WAVS_PER_CLASS = 2**27 - 1  # ~134M
 
     base_name = os.path.basename(filename)
@@ -456,7 +458,7 @@ def which_set(filename, validation_percentage, testing_percentage):
     # deciding which set to put a wav in, so the data set creator has a way of
     # grouping wavs that are close variations of each other.
     hash_name = re.sub(r'_nohash_.*$', '', base_name).encode("utf-8")
-    
+
     # This looks a bit magical, but we need to decide whether this file should
     # go into the training, testing, or validation sets, and we want to keep
     # existing files in the same set even if more files are subsequently
@@ -465,8 +467,9 @@ def which_set(filename, validation_percentage, testing_percentage):
     # itself, so we do a hash of that and then use that to generate a
     # probability value that we use to assign it.
     hash_name_hashed = hashlib.sha1(hash_name).hexdigest()
-    percentage_hash = ((int(hash_name_hashed, 16) % (MAX_NUM_WAVS_PER_CLASS + 1)) * (100.0 / MAX_NUM_WAVS_PER_CLASS))
-    
+    percentage_hash = ((int(hash_name_hashed, 16) % (
+        MAX_NUM_WAVS_PER_CLASS + 1)) * (100.0 / MAX_NUM_WAVS_PER_CLASS))
+
     if percentage_hash < validation_percentage:
         result = 'validation'
     elif percentage_hash < (testing_percentage + validation_percentage):
@@ -479,8 +482,11 @@ def which_set(filename, validation_percentage, testing_percentage):
 
 def filter_speechcommands(tag, training_percentage, data):
     if training_percentage < 100.:
-        testing_percentage = (100. - training_percentage - validation_percentage)
-        which_set_filter = lambda x: which_set(x, validation_percentage, testing_percentage) == tag
+        testing_percentage = (
+            100. - training_percentage - validation_percentage)
+
+        def which_set_filter(x): return which_set(
+            x, validation_percentage, testing_percentage) == tag
         data._walker = list(filter(which_set_filter, data._walker))
     return data
 
@@ -488,6 +494,7 @@ def filter_speechcommands(tag, training_percentage, data):
 def datasets():
 
     root = "./"
+
     def create(tag):
         data = SPEECHCOMMANDS(root, download=True)
         data = filter_speechcommands(tag, training_percentage, data)
@@ -505,12 +512,13 @@ def datasets():
 
 
 if False:
-    
+
     from collections import Counter
     from collections import OrderedDict
 
     training_unprocessed = SPEECHCOMMANDS("./", download=True)
-    training_unprocessed = filter_speechcommands(training_percentage, training_unprocessed)
+    training_unprocessed = filter_speechcommands(
+        training_percentage, training_unprocessed)
 
     counter = Counter([t[2] for t in training_unprocessed])
     counter = OrderedDict(counter.most_common())
@@ -532,7 +540,7 @@ if False:
 # In[ ]:
 
 
-def weight_init(m): 
+def weight_init(m):
     if isinstance(m, nn.Linear):
         size = m.weight.size()
         fan_out = size[0]  # number of rows
@@ -548,7 +556,7 @@ class PrintLayer(nn.Module):
     def forward(self, x):
         print(x, flush=True)
         return x
-    
+
 
 class Wav2Letter(nn.Module):
     """Wav2Letter Speech Recognition model
@@ -602,7 +610,7 @@ class Wav2Letter(nn.Module):
         # y_pred: (batch_size, num_classes, output_len)
         y_pred = y_pred.transpose(-1, -2)
         # y_pred: (batch_size, output_len, num_classes)
-        return nn.functional.log_softmax(y_pred, dim=-1)    
+        return nn.functional.log_softmax(y_pred, dim=-1)
 
 
 # In[ ]:
@@ -612,7 +620,7 @@ class LSTMModel(nn.Module):
 
     def __init__(self, num_features, num_classes, num_layers, bidirectional, dropout, batch_first):
         super().__init__()
-        
+
         directions = bidirectional + 1
 
         self.layer = nn.LSTM(
@@ -634,7 +642,7 @@ class LSTMModel(nn.Module):
         # outputs = self.hidden2class(outputs)
         # outputs: batch, seq_len, num_features
         # print(outputs.shape, flush=True)
-        return nn.functional.log_softmax(outputs, dim=-1)    
+        return nn.functional.log_softmax(outputs, dim=-1)
 
 
 # # Word Decoder
@@ -666,7 +674,7 @@ def build_transitions():
 
     for _, label in training:
         # Count bigrams
-        count = [((a.item(), b.item())) for (a,b) in zip(label, label[1:])]
+        count = [((a.item(), b.item())) for (a, b) in zip(label, label[1:])]
         count = Counter(count)
         if c is None:
             c = count
@@ -675,14 +683,16 @@ def build_transitions():
 
     # Encode as transition matrix
 
-    ind = torch.tensor(list(zip(*[a for (a,b) in c.items()])))
-    val = torch.tensor([b for (a,b) in c.items()], dtype=torch.float)
+    ind = torch.tensor(list(zip(*[a for (a, b) in c.items()])))
+    val = torch.tensor([b for (a, b) in c.items()], dtype=torch.float)
 
-    transitions = torch.sparse_coo_tensor(indices=ind, values=val, size=[vocab_size,vocab_size]).coalesce().to_dense()
-    transitions = (transitions/torch.max(torch.tensor(1.), transitions.max(dim=1)[0]).unsqueeze(1))
-    
+    transitions = torch.sparse_coo_tensor(indices=ind, values=val, size=[
+                                          vocab_size, vocab_size]).coalesce().to_dense()
+    transitions = (transitions/torch.max(torch.tensor(1.),
+                                         transitions.max(dim=1)[0]).unsqueeze(1))
+
     return transitions
-    
+
 
 transitions = build_transitions()
 
@@ -693,7 +703,8 @@ transitions = build_transitions()
 # https://gist.github.com/PetrochukM/afaa3613a99a8e7213d2efdd02ae4762
 # https://github.com/napsternxg/pytorch-practice/blob/master/Viterbi%20decoding%20and%20CRF.ipynb
 
-def viterbi_decode(tag_sequence: torch.Tensor, transition_matrix: torch.Tensor, top_k: int=5):
+
+def viterbi_decode(tag_sequence: torch.Tensor, transition_matrix: torch.Tensor, top_k: int = 5):
     """
     Perform Viterbi decoding in log space over a sequence given a transition matrix
     specifying pairwise (transition) potentials between tags and a matrix of shape
@@ -729,10 +740,11 @@ def viterbi_decode(tag_sequence: torch.Tensor, transition_matrix: torch.Tensor, 
     for timestep in range(1, sequence_length):
         # Add pairwise potentials to current scores.
         # assert path_scores[timestep - 1].size() == (n_permutations, num_tags)
-        summed_potentials = path_scores[timestep - 1].unsqueeze(2) + transition_matrix
+        summed_potentials = path_scores[timestep -
+                                        1].unsqueeze(2) + transition_matrix
         summed_potentials = summed_potentials.view(-1, num_tags)
 
-        # Best pairwise potential path score from the previous timestep. 
+        # Best pairwise potential path score from the previous timestep.
         max_k = min(summed_potentials.size()[0], top_k)
         scores, paths = torch.topk(summed_potentials, k=max_k, dim=0)
         # assert scores.size() == (n_permutations, num_tags)
@@ -750,14 +762,15 @@ def viterbi_decode(tag_sequence: torch.Tensor, transition_matrix: torch.Tensor, 
 
     viterbi_paths = []
     for i in range(max_k):
-        
+
         viterbi_path = [best_paths[i].item()]
         for backward_timestep in reversed(path_indices):
-            viterbi_path.append(int(backward_timestep.view(-1)[viterbi_path[-1]]))
-        
+            viterbi_path.append(
+                int(backward_timestep.view(-1)[viterbi_path[-1]]))
+
         # Reverse the backward path.
         viterbi_path.reverse()
-        
+
         # Viterbi paths uses (num_tags * n_permutations) nodes; therefore, we need to modulo.
         viterbi_path = [j % num_tags for j in viterbi_path]
         viterbi_paths.append(viterbi_path)
@@ -765,15 +778,15 @@ def viterbi_decode(tag_sequence: torch.Tensor, transition_matrix: torch.Tensor, 
     return viterbi_paths, viterbi_scores
 
 
-def batch_viterbi_decode(tag_sequence: torch.Tensor, transition_matrix: torch.Tensor, top_k: int=5):
-    
+def batch_viterbi_decode(tag_sequence: torch.Tensor, transition_matrix: torch.Tensor, top_k: int = 5):
+
     outputs = []
     scores = []
     for i in range(tag_sequence.shape[1]):
         paths, score = viterbi_decode(tag_sequence[:, i, :], transitions)
         outputs.append(paths)
         scores.append(score)
-  
+
     return torch.tensor(outputs).transpose(0, -1), torch.cat(scores)
 
 
@@ -787,24 +800,25 @@ def top_batch_viterbi_decode(tag_sequence: torch.Tensor):
 
 # https://martin-thoma.com/word-error-rate-calculation/
 
+
 def levenshtein_distance(r, h):
-    
+
     # initialisation
     d = torch.zeros((len(r)+1, len(h)+1), dtype=torch.long)
-    d[0,:] = torch.arange(0,len(h)+1, dtype=torch.long)
-    d[:,0] = torch.arange(0,len(r)+1, dtype=torch.long)
+    d[0, :] = torch.arange(0, len(h)+1, dtype=torch.long)
+    d[:, 0] = torch.arange(0, len(r)+1, dtype=torch.long)
 
     # computation
     for i in range(1, len(r)+1):
         for j in range(1, len(h)+1):
-            
+
             if r[i-1] == h[j-1]:
-                d[i,j] = d[i-1,j-1]
+                d[i, j] = d[i-1, j-1]
             else:
-                substitution = d[i-1,j-1] + 1
-                insertion    = d[i,j-1] + 1
-                deletion     = d[i-1,j] + 1
-                d[i,j] = min(substitution, insertion, deletion)
+                substitution = d[i-1, j-1] + 1
+                insertion = d[i, j-1] + 1
+                deletion = d[i-1, j] + 1
+                d[i, j] = min(substitution, insertion, deletion)
 
     return d[len(r)][len(h)].item()/len(r)
 
@@ -825,9 +839,9 @@ shape_after_model = {}
 
 
 def collate_fn(batch):
-    
+
     tensors = [b[0] for b in batch if b]
-    
+
     for tensor in tensors:
         shape = int(tensor.shape[0])
         if shape not in shape_after_model:
@@ -838,10 +852,10 @@ def collate_fn(batch):
     tensors_lengths = torch.tensor(
         [shape_after_model[int(t.shape[0])] for t in tensors], dtype=torch.long, device=tensors[0].device
     )
-    
+
     tensors = torch.nn.utils.rnn.pad_sequence(tensors, batch_first=True)
     tensors = tensors.transpose(1, -1)
-    
+
     targets = [b[1] for b in batch if b]
     target_lengths = torch.tensor(
         [target.shape[0] for target in targets], dtype=torch.long, device=tensors.device
@@ -850,7 +864,7 @@ def collate_fn(batch):
 
     # print(targets.shape, flush=True)
     # print(decode(targets.tolist()), flush=True)
-    
+
     return tensors, targets, tensors_lengths, target_lengths
 
 
@@ -897,7 +911,7 @@ def forward_and_loss(inputs, targets, tensors_lengths, target_lengths):
 
     inputs = inputs.to(device, non_blocking=non_blocking)
     targets = targets.to(device, non_blocking=non_blocking)
-    
+
     # keep batch first for data parallel
     outputs = model(inputs).transpose(0, 1)
 
@@ -905,8 +919,8 @@ def forward_and_loss(inputs, targets, tensors_lengths, target_lengths):
     seq_len = outputs.shape[0]
     # input_lengths = torch.full((this_batch_size,), seq_len, dtype=torch.long, device=outputs.device)
     input_lengths = tensors_lengths
-    
-    # CTC    
+
+    # CTC
     # outputs: input length, batch size, number of classes (including blank)
     # targets: batch size, max target length
     # input_lengths: batch size
@@ -915,19 +929,19 @@ def forward_and_loss(inputs, targets, tensors_lengths, target_lengths):
     return criterion(outputs, targets, input_lengths, target_lengths)
 
 
-
 def forward_decode(output, targets, decoder):
-    
+
     output = model(inputs).to("cpu")
     output = decoder(output)
-    
+
     output = decode(output.tolist())
     target = decode(targets.tolist())
-    
+
     print_length = 20
     output_print = output[0].ljust(print_length)[:print_length]
     target_print = target[0].ljust(print_length)[:print_length]
-    print(f"Epoch: {epoch:4}   Target: {target_print}   Output: {output_print}", flush=True)
+    print(
+        f"Epoch: {epoch:4}   Target: {target_print}   Output: {output_print}", flush=True)
 
     cers = [levenshtein_distance(a, b) for a, b in zip(target, output)]
     cers = statistics.mean(cers)
@@ -936,9 +950,9 @@ def forward_decode(output, targets, decoder):
     target = [o.split(char_space) for o in target]
     wers = [levenshtein_distance(a, b) for a, b in zip(target, output)]
     wers = statistics.mean(wers)
-    
+
     print(f"Epoch: {epoch:4}   CER: {cers:1.5f}   WER: {wers:1.5f}", flush=True)
-    
+
     return cers, wers
 
 
@@ -952,7 +966,8 @@ if os.path.isfile(CHECKPOINT_filename):
     best_loss = checkpoint['best_loss']
     model.load_state_dict(checkpoint['state_dict'])
     optimizer.load_state_dict(checkpoint['optimizer'])
-    print("=> loaded checkpoint '{}' (epoch {})".format(CHECKPOINT_filename, checkpoint['epoch']))
+    print("=> loaded checkpoint '{}' (epoch {})".format(
+        CHECKPOINT_filename, checkpoint['epoch']))
 else:
     print("=> no checkpoint found")
     save_checkpoint({
@@ -981,21 +996,24 @@ with tqdm(total=max_epoch, unit_scale=1) as pbar:
         sum_loss = 0.
         for inputs, targets, tensors_lengths, target_lengths in loader_training:
 
-            loss = forward_and_loss(inputs, targets, tensors_lengths, target_lengths)
+            loss = forward_and_loss(
+                inputs, targets, tensors_lengths, target_lengths)
             sum_loss += loss.item()
 
             optimizer.zero_grad()
             loss.backward()
             if clip_norm > 0:
-                total_norm = torch.nn.utils.clip_grad_norm_(model.parameters(), clip_norm)
+                total_norm = torch.nn.utils.clip_grad_norm_(
+                    model.parameters(), clip_norm)
                 gradient_norm_training.append((epoch, total_norm))
-                print(f"Epoch: {epoch:4}   Gradient: {total_norm:4.5f}", flush=True)
+                print(
+                    f"Epoch: {epoch:4}   Gradient: {total_norm:4.5f}", flush=True)
             optimizer.step()
 
             pbar.update(1/len(loader_training))
-            
+
             if SIGNAL_RECEIVED:
-                
+
                 save_checkpoint({
                     'epoch': epoch,
                     'state_dict': model.state_dict(),
@@ -1003,35 +1021,36 @@ with tqdm(total=max_epoch, unit_scale=1) as pbar:
                     'optimizer': optimizer.state_dict(),
                     'scheduler': scheduler.state_dict(),
                 }, False)
-                
+
                 trigger_job_requeue()
 
         # Average loss
         sum_loss = sum_loss / len(loader_training)
         sum_loss_training.append((epoch, sum_loss))
         sum_loss_str = f"Epoch: {epoch:4}   Train: {sum_loss:4.5f}"
-        
+
         # scheduler.step()
         # scheduler.step(sum_loss)
-        
+
         with torch.no_grad():
 
             if not epoch % mod_epoch or epoch == max_epoch-1:
 
                 total_norm = 0.
                 for p in list(filter(lambda p: p.grad is not None, model.parameters())):
-                    total_norm += p.grad.data.norm(2).item() ** 2                    
+                    total_norm += p.grad.data.norm(2).item() ** 2
                 total_norm = total_norm ** (1. / 2)
                 gradient_norm.append(total_norm)
                 print(f"Epoch: {epoch:4}   Gradient: {total_norm}", flush=True)
-                
+
                 # Switch to evaluation mode
                 model.eval()
-        
+
                 sum_loss = 0.
                 for inputs, targets, tensors_lengths, target_lengths in loader_validation:
-                    sum_loss += forward_and_loss(inputs, targets, tensors_lengths, target_lengths).item()
-                    
+                    sum_loss += forward_and_loss(inputs, targets,
+                                                 tensors_lengths, target_lengths).item()
+
                     if SIGNAL_RECEIVED:
                         break
 
@@ -1041,10 +1060,11 @@ with tqdm(total=max_epoch, unit_scale=1) as pbar:
                 sum_loss_str += f"   Validation: {sum_loss:.5f}"
 
                 cer, wer = forward_decode(inputs, targets, greedy_decode)
-                cer, wer = forward_decode(inputs, targets, top_batch_viterbi_decode)
+                cer, wer = forward_decode(
+                    inputs, targets, top_batch_viterbi_decode)
                 cer_validation.append((epoch, cer))
                 wer_validation.append((epoch, wer))
-                
+
                 print(sum_loss_str, flush=True)
 
                 is_best = sum_loss < best_loss
@@ -1056,7 +1076,7 @@ with tqdm(total=max_epoch, unit_scale=1) as pbar:
                     'optimizer': optimizer.state_dict(),
                     'scheduler': scheduler.state_dict(),
                 }, is_best)
-                
+
         ''' Create an empty file HALT_filename, mark the job as finished
         '''
         if epoch == max_epoch - 1:
@@ -1087,8 +1107,8 @@ plt.legend()
 # In[ ]:
 
 
-sum_loss_training = [(a, math.log(b)) for (a,b) in sum_loss_training]
-sum_loss_validation = [(a, math.log(b)) for (a,b) in sum_loss_validation]
+sum_loss_training = [(a, math.log(b)) for (a, b) in sum_loss_training]
+sum_loss_validation = [(a, math.log(b)) for (a, b) in sum_loss_validation]
 
 plt.plot(*zip(*sum_loss_training), label="training")
 plt.plot(*zip(*sum_loss_validation), label="validation")
@@ -1117,6 +1137,12 @@ print(sum_loss_validation, flush=True)
 # Print performance
 pr.disable()
 s = StringIO()
-ps = pstats.Stats(pr, stream=s).strip_dirs().sort_stats("cumtime").print_stats(20)
+ps = (
+    pstats
+    .Stats(pr, stream=s)
+    .strip_dirs()
+    .sort_stats("cumtime")
+    .print_stats(20)
+)
 print(s.getvalue(), flush=True)
 
