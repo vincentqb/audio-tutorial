@@ -7,6 +7,7 @@
 import argparse
 import collections
 import cProfile
+import datetime
 import hashlib
 import itertools
 import math
@@ -22,6 +23,8 @@ from io import StringIO
 
 import matplotlib
 import torch
+import torch.distributed as dist
+import torch.multiprocessing as mp
 import torchaudio
 from matplotlib import pyplot as plt
 from torch import nn, topk
@@ -35,6 +38,12 @@ from tqdm.notebook import tqdm as tqdm
 matplotlib.use("Agg")
 # get_ipython().run_line_magic('matplotlib', 'inline')
 
+if __name__ == '__main__':
+    mp.set_start_method('forkserver')
+
+
+print("start time: {}".format(str(datetime.now())), flush=True)
+
 # Empty CUDA cache
 torch.cuda.empty_cache()
 
@@ -43,18 +52,40 @@ pr = cProfile.Profile()
 pr.enable()
 
 # Create argument parser
-parser = argparse.ArgumentParser(add_help=False, allow_abbrev=False)
+parser = argparse.ArgumentParser()
 
 
 # In[ ]:
 
 
-parser.add_argument("--batch_size", type=int, default=64)
-parser.add_argument("--learning_rate", type=float, default=1.)
-parser.add_argument("--weight_decay", type=float, default=1e-5)
-parser.add_argument("--eps", type=float, default=1e-8)
-parser.add_argument("--rho", type=float, default=.95)
-parser.add_argument('--checkpoint', default='checkpoint.pth.tar', type=str)
+parser.add_argument('--workers', default=0, type=int,
+                    metavar='N', help='number of data loading workers')
+parser.add_argument('--resume', default='', type=str,
+                    metavar='PATH', help='path to latest checkpoint')
+
+parser.add_argument('--epochs', default=200, type=int,
+                    metavar='N', help='number of total epochs to run')
+parser.add_argument('--start_epoch', default=0, type=int,
+                    metavar='N', help='manual epoch number')
+parser.add_argument('--print_freq', default=10, type=int,
+                    metavar='N', help='print frequency in epochs')
+
+parser.add_argument('--batch_size', default=64, type=int,
+                    metavar='N', help='mini-batch size')
+parser.add_argument('--learning_rate', default=0.1, type=float,
+                    metavar='LR', help='initial learning rate')
+# parser.add_argument('--momentum', default=0.9, type=float, metavar='M', help='momentum')
+parser.add_argument('--weight_decay', default=1e-5,
+                    type=float, metavar='W', help='weight decay')
+parser.add_argument("--eps", metavar='EPS', type=float, default=1e-8)
+parser.add_argument("--rho", metavar='RHO', type=float, default=.95)
+
+parser.add_argument('--world_size', default=1, type=int,
+                    help='number of distributed processes')
+parser.add_argument('--dist_url', default='tcp://224.66.41.62:23456',
+                    type=str, help='url used to set up distributed training')
+parser.add_argument('--dist_backend', default='nccl',
+                    type=str, help='distributed backend')
 
 args, _ = parser.parse_known_args()
 
@@ -74,6 +105,7 @@ num_devices = torch.cuda.device_count()
 print(num_devices, "GPUs", flush=True)
 
 # max number of sentences per batch
+batch_size = args.batch_size
 # batch_size = 2048
 # batch_size = 512
 # batch_size = 256
@@ -84,7 +116,7 @@ training_percentage = 90.
 validation_percentage = 5.
 
 data_loader_training_params = {
-    "num_workers": 0,
+    "num_workers": args.workers,
     "pin_memory": True,
     "shuffle": True,
     "drop_last": True,
@@ -175,9 +207,9 @@ clip_norm = 0.  # 10.
 
 zero_infinity = False
 
-start_epoch = 0
-max_epoch = 200
-mod_epoch = 10
+start_epoch = args.start_epoch
+max_epoch = args.epochs
+mod_epoch = args.print_freq
 
 dtstamp = datetime.now().strftime("%y%m%d.%H%M%S")
 print(dtstamp, flush=True)
@@ -189,7 +221,7 @@ print(dtstamp, flush=True)
 
 
 MAIN_PID = os.getpid()
-CHECKPOINT_filename = args.checkpoint
+CHECKPOINT_filename = args.resume if args.resume else 'checkpoint.pth.tar'
 CHECKPOINT_tempfile = CHECKPOINT_filename + '.temp'
 HALT_filename = CHECKPOINT_filename + '.HALT'
 SIGNAL_RECEIVED = False
@@ -230,7 +262,7 @@ def signal_handler(a, b):
 def trigger_job_requeue():
     ''' Submit a new job to resume from checkpoint.
     '''
-    if os.path.isfile(CHECKPOINT_filename) and os.getpid() == MAIN_PID:
+    if os.path.isfile(CHECKPOINT_filename) and        os.environ['SLURM_PROCID'] == '0' and        os.getpid() == MAIN_PID:
         print('pid: ', os.getpid(), ' ppid: ', os.getppid(), flush=True)
         print('time is up, back to slurm queue', flush=True)
         command = 'scontrol requeue ' + os.environ['SLURM_JOB_ID']
@@ -260,6 +292,25 @@ def save_checkpoint(state, is_best, filename=CHECKPOINT_filename):
     if is_best:
         shutil.copyfile(filename, 'model_best.pth.tar')
     print("Checkpoint done")
+
+
+# In[ ]:
+
+
+# Use #nodes as world_size
+if 'SLURM_NNODES' in os.environ:
+    args.world_size = int(os.environ['SLURM_NNODES'])
+args.distributed = args.world_size > 1
+
+if args.distributed:
+    os.environ['RANK'] = os.environ['SLURM_PROCID']
+    os.environ['WORLD_SIZE'] = str(args.world_size)
+    print('in distributed', os.environ['RANK'],
+          os.environ['MASTER_ADDR'], os.environ['MASTER_PORT'], flush=True)
+    dist.init_process_group(backend=args.dist_backend,
+                            init_method=args.dist_url, world_size=args.world_size)
+
+    print('init process', flush=True)
 
 
 # # Text encoding
@@ -872,9 +923,20 @@ def collate_fn(batch):
 
 
 model = torch.jit.script(model)
-model = nn.DataParallel(model) if num_devices > 1 else model
+
+if not args.distributed:
+    model = torch.nn.DataParallel(model)
+else:
+    model.cuda()
+    model = torch.nn.parallel.DistributedDataParallel(model)
+
 model = model.to(device, non_blocking=non_blocking)
+print('model cuda', flush=True)
 # model.apply(weight_init)
+
+
+# In[ ]:
+
 
 optimizer = Optimizer(model.parameters(), **optimizer_params)
 scheduler = ExponentialLR(optimizer, gamma=gamma)
@@ -959,7 +1021,7 @@ def forward_decode(output, targets, decoder):
 # In[ ]:
 
 
-if os.path.isfile(CHECKPOINT_filename):
+if args.resume and os.path.isfile(CHECKPOINT_filename):
     print("=> loading checkpoint '{}'".format(CHECKPOINT_filename))
     checkpoint = torch.load(CHECKPOINT_filename)
     start_epoch = checkpoint['epoch']
@@ -1145,4 +1207,5 @@ ps = (
     .print_stats(20)
 )
 print(s.getvalue(), flush=True)
+print("stop time: {}".format(str(datetime.now())), flush=True)
 
