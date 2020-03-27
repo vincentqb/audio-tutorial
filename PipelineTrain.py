@@ -32,8 +32,8 @@ from torchaudio.datasets import LIBRISPEECH, SPEECHCOMMANDS
 from torchaudio.transforms import MFCC, Resample
 from tqdm.notebook import tqdm as tqdm
 
-# matplotlib.use("Agg")
-get_ipython().run_line_magic('matplotlib', 'inline')
+matplotlib.use("Agg")
+# get_ipython().run_line_magic('matplotlib', 'inline')
 
 # Empty CUDA cache
 torch.cuda.empty_cache()
