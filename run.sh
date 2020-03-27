@@ -11,4 +11,4 @@
 #SBATCH --open-mode=append
 #SBATCH --time=40:00:00
 
-srun --label python /private/home/vincentqb/experiment/PipelineTrain.py --batch-size 1024 --checkpoint "checkpoint-batch.pth.tar"
+srun --label python /private/home/vincentqb/experiment/PipelineTrain.py --batch-size 1024 --resume "/private/home/vincentqb/experiment/checkpoint-batch.pth.tar"
