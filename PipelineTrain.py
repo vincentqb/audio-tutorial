@@ -304,11 +304,12 @@ args.distributed = args.world_size > 1
 
 if args.distributed:
     os.environ['RANK'] = os.environ['SLURM_PROCID']
+    rank = int(os.environ['RANK'])
     os.environ['WORLD_SIZE'] = str(args.world_size)
     print('in distributed', os.environ['RANK'],
           os.environ['MASTER_ADDR'], os.environ['MASTER_PORT'], flush=True)
     dist.init_process_group(backend=args.dist_backend,
-                            init_method=args.dist_url, world_size=args.world_size)
+                            init_method=args.dist_url, world_size=args.world_size, rank=rank)
 
     print('init process', flush=True)
 
