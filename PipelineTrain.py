@@ -64,30 +64,133 @@ parser.add_argument('--resume', default='', type=str,
 
 parser.add_argument('--epochs', default=200, type=int,
                     metavar='N', help='number of total epochs to run')
-parser.add_argument('--start_epoch', default=0, type=int,
+parser.add_argument('--start-epoch', default=0, type=int,
                     metavar='N', help='manual epoch number')
-parser.add_argument('--print_freq', default=10, type=int,
+parser.add_argument('--print-freq', default=10, type=int,
                     metavar='N', help='print frequency in epochs')
 
-parser.add_argument('--batch_size', default=64, type=int,
+parser.add_argument('--batch-size', default=64, type=int,
                     metavar='N', help='mini-batch size')
-parser.add_argument('--learning_rate', default=0.1, type=float,
+parser.add_argument('--learning-rate', default=0.1, type=float,
                     metavar='LR', help='initial learning rate')
 # parser.add_argument('--momentum', default=0.9, type=float, metavar='M', help='momentum')
-parser.add_argument('--weight_decay', default=1e-5,
+parser.add_argument('--weight-decay', default=1e-5,
                     type=float, metavar='W', help='weight decay')
 parser.add_argument("--eps", metavar='EPS', type=float, default=1e-8)
 parser.add_argument("--rho", metavar='RHO', type=float, default=.95)
 
-parser.add_argument('--world_size', default=1, type=int,
+parser.add_argument('--world-size', default=1, type=int,
                     help='number of distributed processes')
-parser.add_argument('--dist_url', default='tcp://224.66.41.62:23456',
+parser.add_argument('--dist-url', default='tcp://224.66.41.62:23456',
                     type=str, help='url used to set up distributed training')
-parser.add_argument('--dist_backend', default='nccl',
+parser.add_argument('--dist-backend', default='nccl',
                     type=str, help='distributed backend')
+parser.add_argument('--dataset', default='librispeech', type=str)
 
-args, _ = parser.parse_known_args()
+args, _ = parser.parse_args()
 
+
+# # Checkpoint
+
+# In[ ]:
+
+
+MAIN_PID = os.getpid()
+CHECKPOINT_filename = args.resume if args.resume else 'checkpoint.pth.tar'
+CHECKPOINT_tempfile = CHECKPOINT_filename + '.temp'
+HALT_filename = CHECKPOINT_filename + '.HALT'
+SIGNAL_RECEIVED = False
+
+''' HALT file is used as a sign of job completion.
+Make sure no HALT file left from previous runs.
+'''
+if os.path.isfile(HALT_filename):
+    os.remove(HALT_filename)
+
+''' Remove CHECKPOINT_tempfile, in case the signal arrives in the
+middle of copying from CHECKPOINT_tempfile to CHECKPOINT_filename
+'''
+if os.path.isfile(CHECKPOINT_tempfile):
+    os.remove(CHECKPOINT_tempfile)
+
+
+def SIGTERM_handler(a, b):
+    print('received sigterm')
+    pass
+
+
+def signal_handler(a, b):
+    global SIGNAL_RECEIVED
+    print('Signal received', a, datetime.now().strftime(
+        "%y%m%d.%H%M%S"), flush=True)
+    SIGNAL_RECEIVED = True
+
+    ''' If HALT file exists, which means the job is done, exit peacefully.
+    '''
+    if os.path.isfile(HALT_filename):
+        print('Job is done, exiting')
+        exit(0)
+
+    return
+
+
+def trigger_job_requeue():
+    ''' Submit a new job to resume from checkpoint.
+    '''
+    if os.path.isfile(CHECKPOINT_filename) and        os.environ['SLURM_PROCID'] == '0' and        os.getpid() == MAIN_PID:
+        print('pid: ', os.getpid(), ' ppid: ', os.getppid(), flush=True)
+        print('time is up, back to slurm queue', flush=True)
+        command = 'scontrol requeue ' + os.environ['SLURM_JOB_ID']
+        print(command)
+        if os.system(command):
+            raise RuntimeError('requeue failed')
+        print('New job submitted to the queue', flush=True)
+    exit(0)
+
+
+''' Install signal handler
+'''
+signal.signal(signal.SIGUSR1, signal_handler)
+signal.signal(signal.SIGTERM, SIGTERM_handler)
+print('Signal handler installed', flush=True)
+
+
+def save_checkpoint(state, is_best, filename=CHECKPOINT_filename):
+    ''' Save the model to a temporary file first,
+    then copy it to filename, in case the signal interrupts
+    the torch.save() process.
+    '''
+    # if os.environ['SLURM_PROCID'] == '0':
+    torch.save(state, CHECKPOINT_tempfile)
+    if os.path.isfile(CHECKPOINT_tempfile):
+        os.rename(CHECKPOINT_tempfile, filename)
+    if is_best:
+        shutil.copyfile(filename, 'model_best.pth.tar')
+    print("Checkpoint done")
+
+
+# # Distributed
+
+# In[ ]:
+
+
+# Use #nodes as world_size
+if 'SLURM_NNODES' in os.environ:
+    args.world_size = int(os.environ['SLURM_NNODES'])
+args.distributed = args.world_size > 1
+
+if args.distributed:
+    os.environ['RANK'] = os.environ['SLURM_PROCID']
+    os.environ['WORLD_SIZE'] = str(args.world_size)
+    print('in distributed', os.environ['RANK'],
+          os.environ['MASTER_ADDR'], os.environ['MASTER_PORT'], flush=True)
+    dist.init_process_group(backend=args.dist_backend,
+                            init_method=args.dist_url, world_size=args.world_size)
+
+    print('init process', flush=True)
+
+
+# # Parameters
 
 # In[ ]:
 
@@ -212,105 +315,6 @@ mod_epoch = args.print_freq
 
 dtstamp = datetime.now().strftime("%y%m%d.%H%M%S")
 print(dtstamp, flush=True)
-
-
-# # Checkpoint
-
-# In[ ]:
-
-
-MAIN_PID = os.getpid()
-CHECKPOINT_filename = args.resume if args.resume else 'checkpoint.pth.tar'
-CHECKPOINT_tempfile = CHECKPOINT_filename + '.temp'
-HALT_filename = CHECKPOINT_filename + '.HALT'
-SIGNAL_RECEIVED = False
-
-''' HALT file is used as a sign of job completion.
-Make sure no HALT file left from previous runs.
-'''
-if os.path.isfile(HALT_filename):
-    os.remove(HALT_filename)
-
-''' Remove CHECKPOINT_tempfile, in case the signal arrives in the
-middle of copying from CHECKPOINT_tempfile to CHECKPOINT_filename
-'''
-if os.path.isfile(CHECKPOINT_tempfile):
-    os.remove(CHECKPOINT_tempfile)
-
-
-def SIGTERM_handler(a, b):
-    print('received sigterm')
-    pass
-
-
-def signal_handler(a, b):
-    global SIGNAL_RECEIVED
-    print('Signal received', a, datetime.now().strftime(
-        "%y%m%d.%H%M%S"), flush=True)
-    SIGNAL_RECEIVED = True
-
-    ''' If HALT file exists, which means the job is done, exit peacefully.
-    '''
-    if os.path.isfile(HALT_filename):
-        print('Job is done, exiting')
-        exit(0)
-
-    return
-
-
-def trigger_job_requeue():
-    ''' Submit a new job to resume from checkpoint.
-    '''
-    if os.path.isfile(CHECKPOINT_filename) and        os.environ['SLURM_PROCID'] == '0' and        os.getpid() == MAIN_PID:
-        print('pid: ', os.getpid(), ' ppid: ', os.getppid(), flush=True)
-        print('time is up, back to slurm queue', flush=True)
-        command = 'scontrol requeue ' + os.environ['SLURM_JOB_ID']
-        print(command)
-        if os.system(command):
-            raise RuntimeError('requeue failed')
-        print('New job submitted to the queue', flush=True)
-    exit(0)
-
-
-''' Install signal handler
-'''
-signal.signal(signal.SIGUSR1, signal_handler)
-signal.signal(signal.SIGTERM, SIGTERM_handler)
-print('Signal handler installed', flush=True)
-
-
-def save_checkpoint(state, is_best, filename=CHECKPOINT_filename):
-    ''' Save the model to a temporary file first,
-    then copy it to filename, in case the signal interrupts
-    the torch.save() process.
-    '''
-    # if os.environ['SLURM_PROCID'] == '0':
-    torch.save(state, CHECKPOINT_tempfile)
-    if os.path.isfile(CHECKPOINT_tempfile):
-        os.rename(CHECKPOINT_tempfile, filename)
-    if is_best:
-        shutil.copyfile(filename, 'model_best.pth.tar')
-    print("Checkpoint done")
-
-
-# In[ ]:
-
-
-# Use #nodes as world_size
-if 'SLURM_NNODES' in os.environ:
-    args.world_size = int(os.environ['SLURM_NNODES'])
-args.distributed = args.world_size > 1
-
-if args.distributed:
-    os.environ['RANK'] = os.environ['SLURM_PROCID']
-    rank = int(os.environ['RANK'])
-    os.environ['WORLD_SIZE'] = str(args.world_size)
-    print('in distributed', os.environ['RANK'],
-          os.environ['MASTER_ADDR'], os.environ['MASTER_PORT'], flush=True)
-    dist.init_process_group(backend=args.dist_backend,
-                            init_method=args.dist_url, world_size=args.world_size, rank=rank)
-
-    print('init process', flush=True)
 
 
 # # Text encoding
