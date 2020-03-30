@@ -931,7 +931,7 @@ def collate_fn(batch):
 # In[ ]:
 
 
-model = torch.jit.script(model)
+# model = torch.jit.script(model)
 
 if not args.distributed:
     model = torch.nn.DataParallel(model)

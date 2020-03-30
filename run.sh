@@ -18,6 +18,6 @@ export MASTER_ADDR=${SLURM_NODELIST:0:9}${SLURM_NODELIST:10:4}
 export MASTER_PORT=29500
 
 # delelte the second line to start single node training
-srun --label python /private/home/vincentqb/experiment/PipelineTrain.py --batch-size 1024 \
+srun --label python /private/home/vincentqb/experiment/PipelineTrain.py --batch-size 64 \
 	--resume /private/home/vincentqb/experiment/checkpoint-batch.pth.tar \
 	--world-size $SLURM_NNODES --dist-url 'env://' --dist-backend='nccl'
