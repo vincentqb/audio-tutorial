@@ -1060,7 +1060,7 @@ gradient_norm_training = []
 cer_validation = []
 wer_validation = []
 
-with tqdm(total=max_epoch, unit_scale=1) as pbar:
+with tqdm(total=max_epoch, unit_scale=1, disable=args.distributed) as pbar:
     for epoch in range(start_epoch, max_epoch):
         model.train()
 
