@@ -160,13 +160,13 @@ def save_checkpoint(state, is_best, filename=CHECKPOINT_filename):
     then copy it to filename, in case the signal interrupts
     the torch.save() process.
     '''
-    # if os.environ['SLURM_PROCID'] == '0':
-    torch.save(state, CHECKPOINT_tempfile)
-    if os.path.isfile(CHECKPOINT_tempfile):
-        os.rename(CHECKPOINT_tempfile, filename)
-    if is_best:
-        shutil.copyfile(filename, 'model_best.pth.tar')
-    print("Checkpoint done")
+    if os.environ['SLURM_PROCID'] == '0':
+        torch.save(state, CHECKPOINT_tempfile)
+        if os.path.isfile(CHECKPOINT_tempfile):
+            os.rename(CHECKPOINT_tempfile, filename)
+        if is_best:
+            shutil.copyfile(filename, 'model_best.pth.tar')
+        print("Checkpoint done")
 
 
 # # Distributed
