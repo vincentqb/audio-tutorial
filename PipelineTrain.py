@@ -463,7 +463,7 @@ def process_datapoint(item):
 # In[ ]:
 
 
-def datasets():
+def datasets_librispeech():
 
     def create(tag):
         data = LIBRISPEECH(
@@ -473,9 +473,6 @@ def datasets():
         return data
 
     return create("train-clean-100"), create("dev-clean"), None
-
-
-training, validation, _ = datasets()
 
 
 # In[ ]:
@@ -546,7 +543,7 @@ def filter_speechcommands(tag, training_percentage, data):
     return data
 
 
-def datasets():
+def datasets_speechcommands():
 
     root = "./"
 
@@ -560,7 +557,15 @@ def datasets():
     return create("training"), create("validation"), create("testing")
 
 
-# training, validation, _ = datasets()
+# In[ ]:
+
+
+datasets_choices = {
+    "librispeech": datasets_librispeech(),
+    "speechcommand": datasets_speechcommands(),
+}
+
+training, validation, _ = datasets_choices[args.dataset]
 
 
 # In[ ]:
