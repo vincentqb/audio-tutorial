@@ -87,7 +87,7 @@ parser.add_argument('--dist-backend', default='nccl',
                     type=str, help='distributed backend')
 parser.add_argument('--dataset', default='librispeech', type=str)
 
-args, _ = parser.parse_args()
+args = parser.parse_args()
 
 
 # # Checkpoint
