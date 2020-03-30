@@ -50,12 +50,12 @@ torch.cuda.empty_cache()
 pr = cProfile.Profile()
 pr.enable()
 
-# Create argument parser
-parser = argparse.ArgumentParser()
-
 
 # In[ ]:
 
+
+# Create argument parser
+parser = argparse.ArgumentParser()
 
 parser.add_argument('--workers', default=0, type=int,
                     metavar='N', help='number of data loading workers')
@@ -87,7 +87,7 @@ parser.add_argument('--dist-backend', default='nccl',
                     type=str, help='distributed backend')
 parser.add_argument('--dataset', default='librispeech', type=str)
 
-args = parser.parse_args()
+args, _ = parser.parse_args()
 
 
 # # Checkpoint
