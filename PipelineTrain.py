@@ -40,8 +40,10 @@ print("start time: {}".format(str(datetime.now())), flush=True)
 if __name__ == '__main__':
     mp.set_start_method('forkserver')
 
-matplotlib.use("Agg")
-# get_ipython().run_line_magic('matplotlib', 'inline')
+try:
+    get_ipython().run_line_magic('matplotlib', 'inline')
+except NameError:
+    matplotlib.use("Agg")
 
 # Empty CUDA cache
 torch.cuda.empty_cache()
