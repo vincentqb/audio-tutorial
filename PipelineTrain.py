@@ -17,6 +17,7 @@ import shutil
 import signal
 import statistics
 import string
+from collections import defaultdict
 from datetime import datetime
 from io import StringIO
 
