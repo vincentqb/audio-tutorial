@@ -883,7 +883,10 @@ def levenshtein_distance(r, h):
                 deletion = d[i-1, j] + 1
                 d[i, j] = min(substitution, insertion, deletion)
 
-    return d[len(r)][len(h)].item()/len(r)
+    dist = d[len(r)][len(h)].item()
+
+    return dist
+    # return dist/len(r)
 
 
 # # Train
@@ -981,7 +984,7 @@ print(len(loader_training), len(loader_validation), flush=True)
 # In[ ]:
 
 
-def forward_and_loss(inputs, targets, tensors_lengths, target_lengths):
+def forward_loss(inputs, targets, tensors_lengths, target_lengths):
 
     inputs = inputs.to(device, non_blocking=non_blocking)
     targets = targets.to(device, non_blocking=non_blocking)
@@ -1018,16 +1021,19 @@ def forward_decode(output, targets, decoder):
         f"Epoch: {epoch:4}   Target: {target_print}   Output: {output_print}", flush=True)
 
     cers = [levenshtein_distance(a, b) for a, b in zip(target, output)]
+    cers_normalized = [d/len(a) for a, d in zip(target, cers)]
     cers = statistics.mean(cers)
 
     output = [o.split(char_space) for o in output]
     target = [o.split(char_space) for o in target]
+
     wers = [levenshtein_distance(a, b) for a, b in zip(target, output)]
+    wers_normalized = [d/len(a) for a, d in zip(target, wers)]
     wers = statistics.mean(wers)
 
     print(f"Epoch: {epoch:4}   CER: {cers:1.5f}   WER: {wers:1.5f}", flush=True)
 
-    return cers, wers
+    return cers, wers, cers_normalized, wers_normalized
 
 
 # In[ ]:
@@ -1056,38 +1062,39 @@ else:
 # In[ ]:
 
 
-sum_loss_training = []
-sum_loss_validation = []
-gradient_norm = []
-gradient_norm_training = []
-cer_validation = []
-wer_validation = []
+history_training = defaultdict(list)
+history_validation = defaultdict(list)
 
 with tqdm(total=max_epoch, unit_scale=1, disable=args.distributed) as pbar:
     for epoch in range(start_epoch, max_epoch):
         model.train()
+        history_validation["epoch"].append(epoch)
 
         sum_loss = 0.
+        total_norm = 0.
         for inputs, targets, tensors_lengths, target_lengths in loader_training:
 
-            loss = forward_and_loss(
+            loss = forward_loss(
                 inputs, targets, tensors_lengths, target_lengths)
             sum_loss += loss.item()
 
             optimizer.zero_grad()
             loss.backward()
+
             if clip_norm > 0:
-                total_norm = torch.nn.utils.clip_grad_norm_(
+                norm = torch.nn.utils.clip_grad_norm_(
                     model.parameters(), clip_norm)
-                gradient_norm_training.append((epoch, total_norm))
-                print(
-                    f"Epoch: {epoch:4}   Gradient: {total_norm:4.5f}", flush=True)
+                total_norm += norm
+            else:
+                norm = 0.
+                for p in list(filter(lambda p: p.grad is not None, model.parameters())):
+                    norm += p.grad.data.norm(2).item() ** 2
+                norm = norm ** (1. / 2)
+                total_norm += norm
+
             optimizer.step()
 
-            pbar.update(1/len(loader_training))
-
             if SIGNAL_RECEIVED:
-
                 save_checkpoint({
                     'epoch': epoch,
                     'state_dict': model.state_dict(),
@@ -1095,12 +1102,16 @@ with tqdm(total=max_epoch, unit_scale=1, disable=args.distributed) as pbar:
                     'optimizer': optimizer.state_dict(),
                     'scheduler': scheduler.state_dict(),
                 }, False)
-
                 trigger_job_requeue()
+
+            pbar.update(1/len(loader_training))
+
+        print(f"Epoch: {epoch:4}   Gradient: {total_norm:4.5f}", flush=True)
+        history_training["gradient_norm"].append(total_norm)
 
         # Average loss
         sum_loss = sum_loss / len(loader_training)
-        sum_loss_training.append((epoch, sum_loss))
+        history_training["sum_loss"].append(sum_loss)
         sum_loss_str = f"Epoch: {epoch:4}   Train: {sum_loss:4.5f}"
 
         # scheduler.step()
@@ -1109,34 +1120,37 @@ with tqdm(total=max_epoch, unit_scale=1, disable=args.distributed) as pbar:
 
             if not epoch % mod_epoch or epoch == max_epoch-1:
 
-                total_norm = 0.
-                for p in list(filter(lambda p: p.grad is not None, model.parameters())):
-                    total_norm += p.grad.data.norm(2).item() ** 2
-                total_norm = total_norm ** (1. / 2)
-                gradient_norm.append(total_norm)
-                print(f"Epoch: {epoch:4}   Gradient: {total_norm}", flush=True)
+                history_validation["epoch"].append(epoch)
 
                 # Switch to evaluation mode
                 model.eval()
 
                 sum_loss = 0.
                 for inputs, targets, tensors_lengths, target_lengths in loader_validation:
-                    sum_loss += forward_and_loss(inputs, targets,
-                                                 tensors_lengths, target_lengths).item()
+                    sum_loss += forward_loss(inputs, targets,
+                                             tensors_lengths, target_lengths).item()
 
                     if SIGNAL_RECEIVED:
                         break
 
                 # Average loss
                 sum_loss = sum_loss / len(loader_validation)
-                sum_loss_validation.append((epoch, sum_loss))
+                history_validation["sum_loss"].append(sum_loss)
                 sum_loss_str += f"   Validation: {sum_loss:.5f}"
 
-                cer, wer = forward_decode(inputs, targets, greedy_decode)
-                cer, wer = forward_decode(
+                cer, wer, cern, wern = forward_decode(
+                    inputs, targets, greedy_decode)
+                history_validation["greedy cer"].append(cer)
+                history_validation["greedy wer"].append(wer)
+                history_validation["greedy normalized cer"].append(cern)
+                history_validation["greedy normalized wer"].append(wern)
+
+                cer, wer, cern, wern = forward_decode(
                     inputs, targets, top_batch_viterbi_decode)
-                cer_validation.append((epoch, cer))
-                wer_validation.append((epoch, wer))
+                history_validation["viterbi cer"].append(cer)
+                history_validation["viterbi wer"].append(wer)
+                history_validation["viterbi normalized cer"].append(cern)
+                history_validation["viterbi normalized wer"].append(wern)
 
                 print(sum_loss_str, flush=True)
 
@@ -1161,55 +1175,69 @@ with tqdm(total=max_epoch, unit_scale=1, disable=args.distributed) as pbar:
 # In[ ]:
 
 
-plt.plot(*zip(*cer_validation))
-
-
-# In[ ]:
-
-
-plt.plot(*zip(*wer_validation))
-
-
-# In[ ]:
-
-
-plt.plot(*zip(*sum_loss_training), label="training")
-plt.plot(*zip(*sum_loss_validation), label="validation")
-
+plt.plot(history_validation["epoch"],
+         history_validation["greedy cer"], label="greedy")
+plt.plot(history_validation["epoch"],
+         history_validation["viterbi cer"], label="viterbi")
 plt.legend()
 
 
 # In[ ]:
 
 
-sum_loss_training = [(a, math.log(b)) for (a, b) in sum_loss_training]
-sum_loss_validation = [(a, math.log(b)) for (a, b) in sum_loss_validation]
-
-plt.plot(*zip(*sum_loss_training), label="training")
-plt.plot(*zip(*sum_loss_validation), label="validation")
-
+plt.plot(history_validation["epoch"],
+         history_validation["greedy wer"], label="greedy")
+plt.plot(history_validation["epoch"],
+         history_validation["viterbi wer"], label="viterbi")
 plt.legend()
 
 
 # In[ ]:
 
 
-d = {
-    'Epoch': [e[0] for e in cer_validation],
-    'CER Validation': [e[1] for e in cer_validation],
-    'WER Validation': [e[1] for e in wer_validation],
-    'Loss Validation': [e[1] for e in sum_loss_validation],
-    'Gradient': gradient_norm,
-}
+plt.plot(history_validation["epoch"],
+         history_validation["greedy cer normalized"], label="greedy")
+plt.plot(history_validation["epoch"],
+         history_validation["viterbi cer normalized"], label="viterbi")
+plt.legend()
 
-print(tabulate(d, headers="keys"), flush=True)
 
-d = {
-    'Epoch': [e[0] for e in sum_loss_training],
-    'Loss Training': [e[1] for e in sum_loss_training],
-}
+# In[ ]:
 
-print(tabulate(d, headers="keys"), flush=True)
+
+plt.plot(history_validation["epoch"],
+         history_validation["greedy wer normalized"], label="greedy")
+plt.plot(history_validation["epoch"],
+         history_validation["viterbi wer normalized"], label="viterbi")
+plt.legend()
+
+
+# In[ ]:
+
+
+plt.plot(history_training["epoch"],
+         history_training["sum_loss"], label="training")
+plt.plot(history_validation["epoch"],
+         history_validation["sum_loss"], label="validation")
+plt.legend()
+
+
+# In[ ]:
+
+
+plt.plot(history_training["epoch"],
+         history_training["sum_loss"], label="training")
+plt.plot(history_validation["epoch"],
+         history_validation["sum_loss"], label="validation")
+plt.yscale("log")
+plt.legend()
+
+
+# In[ ]:
+
+
+print(tabulate(history_training, headers="keys"), flush=True)
+print(tabulate(history_validation, headers="keys"), flush=True)
 
 
 # In[ ]:
