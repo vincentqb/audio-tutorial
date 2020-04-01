@@ -19,6 +19,7 @@ import signal
 import statistics
 import string
 from datetime import datetime
+from tabulate import tabulate
 from io import StringIO
 
 import matplotlib
@@ -454,6 +455,7 @@ def process_datapoint(item):
 
     transformed = transformed[0, ...].transpose(0, -1)
 
+    target = " " + target + " "
     target = encode(target)
     target = torch.tensor(target, dtype=torch.long, device=transformed.device)
 
@@ -647,10 +649,10 @@ class Wav2Letter(nn.Module):
             nn.ReLU(),
             nn.Conv1d(250, 250, 7),
             nn.ReLU(),
-            # nn.Conv1d(250, 250, 7),
-            # nn.ReLU(),
-            # nn.Conv1d(250, 250, 7),
-            # nn.ReLU(),
+            nn.Conv1d(250, 250, 7),
+            nn.ReLU(),
+            nn.Conv1d(250, 250, 7),
+            nn.ReLU(),
             nn.Conv1d(250, 2000, 32),
             nn.ReLU(),
             nn.Conv1d(2000, 2000, 1),
@@ -950,8 +952,8 @@ print('model cuda', flush=True)
 
 
 optimizer = Optimizer(model.parameters(), **optimizer_params)
-scheduler = ExponentialLR(optimizer, gamma=gamma)
-# scheduler = ReduceLROnPlateau(optimizer)
+# scheduler = ExponentialLR(optimizer, gamma=gamma)
+scheduler = ReduceLROnPlateau(optimizer)
 
 criterion = torch.nn.CTCLoss(zero_infinity=zero_infinity)
 # criterion = nn.MSELoss()
@@ -1103,7 +1105,6 @@ with tqdm(total=max_epoch, unit_scale=1, disable=args.distributed) as pbar:
         sum_loss_str = f"Epoch: {epoch:4}   Train: {sum_loss:4.5f}"
 
         # scheduler.step()
-        # scheduler.step(sum_loss)
 
         with torch.no_grad():
 
@@ -1150,6 +1151,8 @@ with tqdm(total=max_epoch, unit_scale=1, disable=args.distributed) as pbar:
                     'scheduler': scheduler.state_dict(),
                 }, is_best)
 
+        scheduler.step(sum_loss)
+
         ''' Create an empty file HALT_filename, mark the job as finished
         '''
         if epoch == max_epoch - 1:
@@ -1192,10 +1195,27 @@ plt.legend()
 # In[ ]:
 
 
-print(cer_validation, flush=True)
-print(wer_validation, flush=True)
-print(sum_loss_training, flush=True)
-print(sum_loss_validation, flush=True)
+
+
+# In[ ]:
+
+
+d = {
+    'Epoch': [e[0] for e in cer_validation],
+    'CER Validation': [e[1] for e in cer_validation],
+    'WER Validation': [e[1] for e in wer_validation],
+    'Loss Validation': [e[1] for e in sum_loss_validation],
+    'Gradient': gradient_norm,
+}
+
+print(tabulate(d, headers="keys"), flush=True)
+
+d = {
+    'Epoch': [e[0] for e in sum_loss_training],
+    'Loss Training': [e[1] for e in sum_loss_training],
+}
+
+print(tabulate(d, headers="keys"), flush=True)
 
 
 # In[ ]:
