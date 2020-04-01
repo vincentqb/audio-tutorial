@@ -1046,6 +1046,7 @@ if args.resume and os.path.isfile(CHECKPOINT_filename):
     best_loss = checkpoint['best_loss']
     model.load_state_dict(checkpoint['state_dict'])
     optimizer.load_state_dict(checkpoint['optimizer'])
+    scheduler.load_state_dict(checkpoint['scheduler'])
     print("=> loaded checkpoint '{}' (epoch {})".format(
         CHECKPOINT_filename, checkpoint['epoch']))
 else:
