@@ -7,7 +7,6 @@
 import argparse
 import collections
 import cProfile
-import datetime
 import hashlib
 import itertools
 import math
@@ -19,7 +18,6 @@ import signal
 import statistics
 import string
 from datetime import datetime
-from tabulate import tabulate
 from io import StringIO
 
 import matplotlib
@@ -28,6 +26,7 @@ import torch.distributed as dist
 import torch.multiprocessing as mp
 import torchaudio
 from matplotlib import pyplot as plt
+from tabulate import tabulate
 from torch import nn, topk
 from torch.optim import SGD, Adadelta, Adam
 from torch.optim.lr_scheduler import ExponentialLR, ReduceLROnPlateau
@@ -1190,11 +1189,6 @@ plt.plot(*zip(*sum_loss_training), label="training")
 plt.plot(*zip(*sum_loss_validation), label="validation")
 
 plt.legend()
-
-
-# In[ ]:
-
-
 
 
 # In[ ]:
