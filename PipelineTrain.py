@@ -1040,6 +1040,9 @@ def forward_decode(output, targets, decoder):
 # In[ ]:
 
 
+history_training = defaultdict(list)
+history_validation = defaultdict(list)
+
 if args.resume and os.path.isfile(CHECKPOINT_filename):
     print("=> loading checkpoint '{}'".format(CHECKPOINT_filename))
     checkpoint = torch.load(CHECKPOINT_filename)
@@ -1058,14 +1061,13 @@ else:
         'best_loss': best_loss,
         'optimizer': optimizer.state_dict(),
         'scheduler': scheduler.state_dict(),
+        'history_training': history_training,
+        'history_validation': history_validation,
     }, False)
 
 
 # In[ ]:
 
-
-history_training = defaultdict(list)
-history_validation = defaultdict(list)
 
 with tqdm(total=max_epoch, unit_scale=1, disable=args.distributed) as pbar:
     for epoch in range(start_epoch, max_epoch):
@@ -1103,6 +1105,8 @@ with tqdm(total=max_epoch, unit_scale=1, disable=args.distributed) as pbar:
                     'best_loss': best_loss,
                     'optimizer': optimizer.state_dict(),
                     'scheduler': scheduler.state_dict(),
+                    'history_training': history_training,
+                    'history_validation': history_validation,
                 }, False)
                 trigger_job_requeue()
 
@@ -1164,6 +1168,8 @@ with tqdm(total=max_epoch, unit_scale=1, disable=args.distributed) as pbar:
                     'best_loss': best_loss,
                     'optimizer': optimizer.state_dict(),
                     'scheduler': scheduler.state_dict(),
+                    'history_training': history_training,
+                    'history_validation': history_validation,
                 }, is_best)
 
         scheduler.step(sum_loss)
