@@ -89,6 +89,7 @@ parser.add_argument('--dist-url', default='tcp://224.66.41.62:23456',
 parser.add_argument('--dist-backend', default='nccl',
                     type=str, help='distributed backend')
 parser.add_argument('--dataset', default='librispeech', type=str)
+parser.add_argument('--gradient', action="store_true", type=bool)
 
 args = parser.parse_args()
 
@@ -1082,16 +1083,15 @@ with tqdm(total=max_epoch, unit_scale=1, disable=args.distributed) as pbar:
             optimizer.zero_grad()
             loss.backward()
 
-            total_norm = 0.
             if clip_norm > 0:
                 norm = torch.nn.utils.clip_grad_norm_(
                     model.parameters(), clip_norm)
                 total_norm += norm
-            elif False:
+            elif args.gradient:
                 norm = 0.
                 for p in list(filter(lambda p: p.grad is not None, model.parameters())):
                     norm += p.grad.data.norm(2).item() ** 2
-                norm = norm ** (1. / 2)
+                norm = norm ** .5
                 total_norm += norm
 
             optimizer.step()
@@ -1112,6 +1112,7 @@ with tqdm(total=max_epoch, unit_scale=1, disable=args.distributed) as pbar:
 
         history_training["epoch"].append(epoch)
         print(f"Epoch: {epoch:4}   Gradient: {total_norm:4.5f}", flush=True)
+        total_norm = (total_norm ** .5) / len(loader_training)
         history_training["gradient_norm"].append(total_norm)
 
         # Average loss
