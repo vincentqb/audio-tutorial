@@ -299,6 +299,7 @@ gamma = 0.95
 num_features = n_mfcc if n_mfcc else 1
 
 lstm_params = {
+    "hidden_size": 1000,
     "num_layers": 3,
     "batch_first": False,
     "bidirectional": False,
@@ -675,21 +676,22 @@ class Wav2Letter(nn.Module):
         return nn.functional.log_softmax(y_pred, dim=-1)
 
 
-# In[ ]:
+# In[14]:
 
 
 class LSTMModel(nn.Module):
 
-    def __init__(self, num_features, num_classes, num_layers, bidirectional, dropout, batch_first):
+    def __init__(self, num_features, num_classes, hidden_size, num_layers, bidirectional, dropout, batch_first):
         super().__init__()
 
         directions = bidirectional + 1
 
         self.layer = nn.LSTM(
-            num_features, num_classes,
+            num_features, hidden_size=hidden_size,
             num_layers=num_layers, bidirectional=bidirectional, dropout=dropout, batch_first=batch_first
         )
-        # self.hidden2class = nn.Linear(directions*num_classes, num_classes)
+        # self.activation = nn.ReLU(inplace=True)
+        self.hidden2class = nn.Linear(directions*hidden_size, num_classes)
 
     def forward(self, batch):
         # self.layer.flatten_parameters()
@@ -700,6 +702,7 @@ class LSTMModel(nn.Module):
         # batch: batch, seq_len, num_features
         # print(batch.shape, flush=True)
         outputs, _ = self.layer(batch)
+        # outputs = self.activation(outputs)
         # outputs: batch, seq_len, directions*num_features
         # outputs = self.hidden2class(outputs)
         # outputs: batch, seq_len, num_features
