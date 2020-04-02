@@ -104,15 +104,13 @@ CHECKPOINT_tempfile = CHECKPOINT_filename + '.temp'
 HALT_filename = CHECKPOINT_filename + '.HALT'
 SIGNAL_RECEIVED = False
 
-''' HALT file is used as a sign of job completion.
-Make sure no HALT file left from previous runs.
-'''
+# HALT file is used as a sign of job completion.
+# Make sure no HALT file left from previous runs.
 if os.path.isfile(HALT_filename):
     os.remove(HALT_filename)
 
-''' Remove CHECKPOINT_tempfile, in case the signal arrives in the
-middle of copying from CHECKPOINT_tempfile to CHECKPOINT_filename
-'''
+# Remove CHECKPOINT_tempfile, in case the signal arrives in the
+# middle of copying from CHECKPOINT_tempfile to CHECKPOINT_filename
 if os.path.isfile(CHECKPOINT_tempfile):
     os.remove(CHECKPOINT_tempfile)
 
@@ -128,8 +126,7 @@ def signal_handler(a, b):
         "%y%m%d.%H%M%S"), flush=True)
     SIGNAL_RECEIVED = True
 
-    ''' If HALT file exists, which means the job is done, exit peacefully.
-    '''
+    # If HALT file exists, which means the job is done, exit peacefully.
     if os.path.isfile(HALT_filename):
         print('Job is done, exiting')
         exit(0)
@@ -138,8 +135,7 @@ def signal_handler(a, b):
 
 
 def trigger_job_requeue():
-    ''' Submit a new job to resume from checkpoint.
-    '''
+    # Submit a new job to resume from checkpoint.
     if os.path.isfile(CHECKPOINT_filename) and        os.environ['SLURM_PROCID'] == '0' and        os.getpid() == MAIN_PID:
         print('pid: ', os.getpid(), ' ppid: ', os.getppid(), flush=True)
         print('time is up, back to slurm queue', flush=True)
@@ -151,18 +147,18 @@ def trigger_job_requeue():
     exit(0)
 
 
-''' Install signal handler
-'''
+# Install signal handler
 signal.signal(signal.SIGUSR1, signal_handler)
 signal.signal(signal.SIGTERM, SIGTERM_handler)
 print('Signal handler installed', flush=True)
 
 
 def save_checkpoint(state, is_best, filename=CHECKPOINT_filename):
-    ''' Save the model to a temporary file first,
+    """
+    Save the model to a temporary file first,
     then copy it to filename, in case the signal interrupts
     the torch.save() process.
-    '''
+    """
     if not args.distributed or os.environ['SLURM_PROCID'] == '0':
         torch.save(state, CHECKPOINT_tempfile)
         if os.path.isfile(CHECKPOINT_tempfile):
@@ -637,27 +633,28 @@ class Wav2Letter(nn.Module):
 
         # Conv1d(in_channels, out_channels, kernel_size, stride)
         self.layers = nn.Sequential(
-            nn.Conv1d(num_features, 250, 48, 2),
-            nn.ReLU(),
-            nn.Conv1d(250, 250, 7),
-            nn.ReLU(),
-            nn.Conv1d(250, 250, 7),
-            nn.ReLU(),
-            nn.Conv1d(250, 250, 7),
-            nn.ReLU(),
-            nn.Conv1d(250, 250, 7),
-            nn.ReLU(),
-            nn.Conv1d(250, 250, 7),
-            nn.ReLU(),
-            nn.Conv1d(250, 250, 7),
-            nn.ReLU(),
-            nn.Conv1d(250, 250, 7),
-            nn.ReLU(),
-            nn.Conv1d(250, 2000, 32),
-            nn.ReLU(),
-            nn.Conv1d(2000, 2000, 1),
-            nn.ReLU(),
-            nn.Conv1d(2000, num_classes, 1),
+            nn.Conv1d(in_channels=num_features, out_channels=250, kernel_size=48, stride=2, padding=23),
+            nn.ReLU(inplace=True),
+            nn.Conv1d(in_channels=250, out_channels=250, kernel_size=7, stride=1, padding=3),
+            nn.ReLU(inplace=True),
+            nn.Conv1d(in_channels=250, out_channels=250, kernel_size=7, stride=1, padding=3),
+            nn.ReLU(inplace=True),
+            nn.Conv1d(in_channels=250, out_channels=250, kernel_size=7, stride=1, padding=3),
+            nn.ReLU(inplace=True),
+            nn.Conv1d(in_channels=250, out_channels=250, kernel_size=7, stride=1, padding=3),
+            nn.ReLU(inplace=True),
+            nn.Conv1d(in_channels=250, out_channels=250, kernel_size=7, stride=1, padding=3),
+            nn.ReLU(inplace=True),
+            nn.Conv1d(in_channels=250, out_channels=250, kernel_size=7, stride=1, padding=3),
+            nn.ReLU(inplace=True),
+            nn.Conv1d(in_channels=250, out_channels=250, kernel_size=7, stride=1, padding=3),
+            nn.ReLU(inplace=True),
+            nn.Conv1d(in_channels=250, out_channels=2000, kernel_size=32, stride=1, padding=16),
+            nn.ReLU(inplace=True),
+            nn.Conv1d(in_channels=2000, out_channels=2000, kernel_size=1, stride=1, padding=0),
+            nn.ReLU(inplace=True),
+            nn.Conv1d(in_channels=2000, out_channels=num_classes, kernel_size=1, stride=1, padding=0),
+            nn.ReLU(inplace=True),
         )
 
     def forward(self, batch):
@@ -1024,6 +1021,7 @@ def forward_decode(output, targets, decoder):
     cers = [levenshtein_distance(a, b) for a, b in zip(target, output)]
     cers_normalized = [d/len(a) for a, d in zip(target, cers)]
     cers = statistics.mean(cers)
+    cers_normalized = statistics.mean(cers_normalized)
 
     output = [o.split(char_space) for o in output]
     target = [o.split(char_space) for o in target]
@@ -1031,13 +1029,13 @@ def forward_decode(output, targets, decoder):
     wers = [levenshtein_distance(a, b) for a, b in zip(target, output)]
     wers_normalized = [d/len(a) for a, d in zip(target, wers)]
     wers = statistics.mean(wers)
-
+    wers_normalized = statistics.mean(wers_normalized)
     print(f"Epoch: {epoch:4}   CER: {cers:1.5f}   WER: {wers:1.5f}", flush=True)
 
     return cers, wers, cers_normalized, wers_normalized
 
 
-# In[ ]:
+# In[25]:
 
 
 history_training = defaultdict(list)
@@ -1072,7 +1070,6 @@ else:
 with tqdm(total=max_epoch, unit_scale=1, disable=args.distributed) as pbar:
     for epoch in range(start_epoch, max_epoch):
         model.train()
-        history_validation["epoch"].append(epoch)
 
         sum_loss = 0.
         total_norm = 0.
@@ -1085,11 +1082,12 @@ with tqdm(total=max_epoch, unit_scale=1, disable=args.distributed) as pbar:
             optimizer.zero_grad()
             loss.backward()
 
+            total_norm = 0.
             if clip_norm > 0:
                 norm = torch.nn.utils.clip_grad_norm_(
                     model.parameters(), clip_norm)
                 total_norm += norm
-            else:
+            elif False:
                 norm = 0.
                 for p in list(filter(lambda p: p.grad is not None, model.parameters())):
                     norm += p.grad.data.norm(2).item() ** 2
@@ -1112,6 +1110,7 @@ with tqdm(total=max_epoch, unit_scale=1, disable=args.distributed) as pbar:
 
             pbar.update(1/len(loader_training))
 
+        history_training["epoch"].append(epoch)
         print(f"Epoch: {epoch:4}   Gradient: {total_norm:4.5f}", flush=True)
         history_training["gradient_norm"].append(total_norm)
 
@@ -1126,8 +1125,6 @@ with tqdm(total=max_epoch, unit_scale=1, disable=args.distributed) as pbar:
 
             if not epoch % mod_epoch or epoch == max_epoch-1:
 
-                history_validation["epoch"].append(epoch)
-
                 # Switch to evaluation mode
                 model.eval()
 
@@ -1139,11 +1136,15 @@ with tqdm(total=max_epoch, unit_scale=1, disable=args.distributed) as pbar:
                     if SIGNAL_RECEIVED:
                         break
 
+                history_validation["epoch"].append(epoch)
+
                 # Average loss
                 sum_loss = sum_loss / len(loader_validation)
                 history_validation["sum_loss"].append(sum_loss)
                 sum_loss_str += f"   Validation: {sum_loss:.5f}"
+                print(sum_loss_str, flush=True)
 
+                print("greedy decoder", flush=True)
                 cer, wer, cern, wern = forward_decode(
                     inputs, targets, greedy_decode)
                 history_validation["greedy cer"].append(cer)
@@ -1151,14 +1152,13 @@ with tqdm(total=max_epoch, unit_scale=1, disable=args.distributed) as pbar:
                 history_validation["greedy normalized cer"].append(cern)
                 history_validation["greedy normalized wer"].append(wern)
 
+                print("viterbi decoder", flush=True)
                 cer, wer, cern, wern = forward_decode(
                     inputs, targets, top_batch_viterbi_decode)
                 history_validation["viterbi cer"].append(cer)
                 history_validation["viterbi wer"].append(wer)
                 history_validation["viterbi normalized cer"].append(cern)
                 history_validation["viterbi normalized wer"].append(wern)
-
-                print(sum_loss_str, flush=True)
 
                 is_best = sum_loss < best_loss
                 best_loss = min(sum_loss, best_loss)
@@ -1174,8 +1174,7 @@ with tqdm(total=max_epoch, unit_scale=1, disable=args.distributed) as pbar:
 
         scheduler.step(sum_loss)
 
-        ''' Create an empty file HALT_filename, mark the job as finished
-        '''
+        # Create an empty file HALT_filename, mark the job as finished
         if epoch == max_epoch - 1:
             open(HALT_filename, 'a').close()
 
