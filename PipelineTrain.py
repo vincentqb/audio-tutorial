@@ -687,7 +687,7 @@ class Wav2Letter(nn.Module):
         return nn.functional.log_softmax(y_pred, dim=-1)
 
 
-# In[14]:
+# In[ ]:
 
 
 class LSTMModel(nn.Module):
@@ -1045,12 +1045,13 @@ def forward_decode(output, targets, decoder):
     wers_normalized = [d/len(a) for a, d in zip(target, wers)]
     wers = statistics.mean(wers)
     wers_normalized = statistics.mean(wers_normalized)
+
     print(f"Epoch: {epoch:4}   CER: {cers:1.5f}   WER: {wers:1.5f}", flush=True)
 
     return cers, wers, cers_normalized, wers_normalized
 
 
-# In[25]:
+# In[ ]:
 
 
 history_training = defaultdict(list)
