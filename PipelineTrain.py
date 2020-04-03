@@ -899,7 +899,6 @@ def levenshtein_distance(r, h):
     dist = d[len(r)][len(h)].item()
 
     return dist
-    # return dist/len(r)
 
 
 # # Train
