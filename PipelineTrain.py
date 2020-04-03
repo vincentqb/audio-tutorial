@@ -635,27 +635,38 @@ class Wav2Letter(nn.Module):
 
         # Conv1d(in_channels, out_channels, kernel_size, stride)
         self.layers = nn.Sequential(
-            nn.Conv1d(in_channels=num_features, out_channels=250, kernel_size=48, stride=2, padding=23),
+            nn.Conv1d(in_channels=num_features, out_channels=250,
+                      kernel_size=48, stride=2, padding=23),
             nn.ReLU(inplace=True),
-            nn.Conv1d(in_channels=250, out_channels=250, kernel_size=7, stride=1, padding=3),
+            nn.Conv1d(in_channels=250, out_channels=250,
+                      kernel_size=7, stride=1, padding=3),
             nn.ReLU(inplace=True),
-            nn.Conv1d(in_channels=250, out_channels=250, kernel_size=7, stride=1, padding=3),
+            nn.Conv1d(in_channels=250, out_channels=250,
+                      kernel_size=7, stride=1, padding=3),
             nn.ReLU(inplace=True),
-            nn.Conv1d(in_channels=250, out_channels=250, kernel_size=7, stride=1, padding=3),
+            nn.Conv1d(in_channels=250, out_channels=250,
+                      kernel_size=7, stride=1, padding=3),
             nn.ReLU(inplace=True),
-            nn.Conv1d(in_channels=250, out_channels=250, kernel_size=7, stride=1, padding=3),
+            nn.Conv1d(in_channels=250, out_channels=250,
+                      kernel_size=7, stride=1, padding=3),
             nn.ReLU(inplace=True),
-            nn.Conv1d(in_channels=250, out_channels=250, kernel_size=7, stride=1, padding=3),
+            nn.Conv1d(in_channels=250, out_channels=250,
+                      kernel_size=7, stride=1, padding=3),
             nn.ReLU(inplace=True),
-            nn.Conv1d(in_channels=250, out_channels=250, kernel_size=7, stride=1, padding=3),
+            nn.Conv1d(in_channels=250, out_channels=250,
+                      kernel_size=7, stride=1, padding=3),
             nn.ReLU(inplace=True),
-            nn.Conv1d(in_channels=250, out_channels=250, kernel_size=7, stride=1, padding=3),
+            nn.Conv1d(in_channels=250, out_channels=250,
+                      kernel_size=7, stride=1, padding=3),
             nn.ReLU(inplace=True),
-            nn.Conv1d(in_channels=250, out_channels=2000, kernel_size=32, stride=1, padding=16),
+            nn.Conv1d(in_channels=250, out_channels=2000,
+                      kernel_size=32, stride=1, padding=16),
             nn.ReLU(inplace=True),
-            nn.Conv1d(in_channels=2000, out_channels=2000, kernel_size=1, stride=1, padding=0),
+            nn.Conv1d(in_channels=2000, out_channels=2000,
+                      kernel_size=1, stride=1, padding=0),
             nn.ReLU(inplace=True),
-            nn.Conv1d(in_channels=2000, out_channels=num_classes, kernel_size=1, stride=1, padding=0),
+            nn.Conv1d(in_channels=2000, out_channels=num_classes,
+                      kernel_size=1, stride=1, padding=0),
             nn.ReLU(inplace=True),
         )
 
@@ -1113,17 +1124,18 @@ with tqdm(total=max_epoch, unit_scale=1, disable=args.distributed) as pbar:
 
             pbar.update(1/len(loader_training))
 
-        history_training["epoch"].append(epoch)
         print(f"Epoch: {epoch:4}   Gradient: {total_norm:4.5f}", flush=True)
         total_norm = (total_norm ** .5) / len(loader_training)
-        history_training["gradient_norm"].append(total_norm)
 
         # Average loss
         sum_loss = sum_loss / len(loader_training)
-        history_training["sum_loss"].append(sum_loss)
         sum_loss_str = f"Epoch: {epoch:4}   Train: {sum_loss:4.5f}"
 
         # scheduler.step()
+
+        history_training["epoch"].append(epoch)
+        history_training["gradient_norm"].append(total_norm)
+        history_training["sum_loss"].append(sum_loss)
 
         with torch.no_grad():
 
@@ -1140,8 +1152,6 @@ with tqdm(total=max_epoch, unit_scale=1, disable=args.distributed) as pbar:
                     if SIGNAL_RECEIVED:
                         break
 
-                history_validation["epoch"].append(epoch)
-
                 # Average loss
                 sum_loss = sum_loss / len(loader_validation)
                 history_validation["sum_loss"].append(sum_loss)
@@ -1149,20 +1159,22 @@ with tqdm(total=max_epoch, unit_scale=1, disable=args.distributed) as pbar:
                 print(sum_loss_str, flush=True)
 
                 print("greedy decoder", flush=True)
-                cer, wer, cern, wern = forward_decode(
+                cer1, wer1, cern1, wern1 = forward_decode(
                     inputs, targets, greedy_decode)
-                history_validation["greedy cer"].append(cer)
-                history_validation["greedy wer"].append(wer)
-                history_validation["greedy normalized cer"].append(cern)
-                history_validation["greedy normalized wer"].append(wern)
 
                 print("viterbi decoder", flush=True)
-                cer, wer, cern, wern = forward_decode(
+                cer2, wer2, cern2, wern2 = forward_decode(
                     inputs, targets, top_batch_viterbi_decode)
-                history_validation["viterbi cer"].append(cer)
-                history_validation["viterbi wer"].append(wer)
-                history_validation["viterbi normalized cer"].append(cern)
-                history_validation["viterbi normalized wer"].append(wern)
+
+                history_validation["epoch"].append(epoch)
+                history_validation["greedy_cer"].append(cer1)
+                history_validation["greedy_wer"].append(wer1)
+                history_validation["greedy_normalized_cer"].append(cern1)
+                history_validation["greedy_normalized_wer"].append(wern1)
+                history_validation["viterbi_cer"].append(cer2)
+                history_validation["viterbi_wer"].append(wer2)
+                history_validation["viterbi_normalized_cer"].append(cern2)
+                history_validation["viterbi_normalized_wer"].append(wern2)
 
                 is_best = sum_loss < best_loss
                 best_loss = min(sum_loss, best_loss)
@@ -1187,9 +1199,9 @@ with tqdm(total=max_epoch, unit_scale=1, disable=args.distributed) as pbar:
 
 
 plt.plot(history_validation["epoch"],
-         history_validation["greedy cer"], label="greedy")
+         history_validation["greedy_cer"], label="greedy")
 plt.plot(history_validation["epoch"],
-         history_validation["viterbi cer"], label="viterbi")
+         history_validation["viterbi_cer"], label="viterbi")
 plt.legend()
 
 
@@ -1197,9 +1209,9 @@ plt.legend()
 
 
 plt.plot(history_validation["epoch"],
-         history_validation["greedy wer"], label="greedy")
+         history_validation["greedy_wer"], label="greedy")
 plt.plot(history_validation["epoch"],
-         history_validation["viterbi wer"], label="viterbi")
+         history_validation["viterbi_wer"], label="viterbi")
 plt.legend()
 
 
@@ -1207,9 +1219,9 @@ plt.legend()
 
 
 plt.plot(history_validation["epoch"],
-         history_validation["greedy cer normalized"], label="greedy")
+         history_validation["greedy_cer_normalized"], label="greedy")
 plt.plot(history_validation["epoch"],
-         history_validation["viterbi cer normalized"], label="viterbi")
+         history_validation["viterbi_cer_normalized"], label="viterbi")
 plt.legend()
 
 
@@ -1217,9 +1229,9 @@ plt.legend()
 
 
 plt.plot(history_validation["epoch"],
-         history_validation["greedy wer normalized"], label="greedy")
+         history_validation["greedy_wer_normalized"], label="greedy")
 plt.plot(history_validation["epoch"],
-         history_validation["viterbi wer normalized"], label="viterbi")
+         history_validation["viterbi_wer_normalized"], label="viterbi")
 plt.legend()
 
 
