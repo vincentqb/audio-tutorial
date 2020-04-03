@@ -72,6 +72,8 @@ parser.add_argument('--start-epoch', default=0, type=int,
 parser.add_argument('--print-freq', default=10, type=int,
                     metavar='N', help='print frequency in epochs')
 
+parser.add_argument('--arch', metavar='ARCH', default='wav2letter',
+                    choices=["wav2letter", "lstm"], help='model architecture')
 parser.add_argument('--batch-size', default=64, type=int,
                     metavar='N', help='mini-batch size')
 parser.add_argument('--learning-rate', default=0.1, type=float,
@@ -562,12 +564,10 @@ def datasets_speechcommands():
 # In[ ]:
 
 
-datasets_choices = {
-    "librispeech": datasets_librispeech(),
-    "speechcommand": datasets_speechcommands(),
-}
-
-training, validation, _ = datasets_choices[args.dataset]
+if args.dataset == "librispeech":
+    training, validation, _ = datasets_librispeech()
+elif args.dataset == "speechcommand":
+    training, validation, _ = datasets_speechcommands()
 
 
 # In[ ]:
@@ -907,8 +907,10 @@ def levenshtein_distance(r, h):
 # In[ ]:
 
 
-model = Wav2Letter(num_features, vocab_size)
-# model = LSTMModel(num_features, vocab_size, **lstm_params)
+if args.arch == "wav2letter":
+    model = Wav2Letter(num_features, vocab_size)
+elif args.arch == "lstm":
+    model = LSTMModel(num_features, vocab_size, **lstm_params)
 
 
 # In[ ]:
@@ -1155,7 +1157,6 @@ with tqdm(total=max_epoch, unit_scale=1, disable=args.distributed) as pbar:
 
                 # Average loss
                 sum_loss = sum_loss / len(loader_validation)
-                history_validation["sum_loss"].append(sum_loss)
                 sum_loss_str += f"   Validation: {sum_loss:.5f}"
                 print(sum_loss_str, flush=True)
 
@@ -1168,6 +1169,7 @@ with tqdm(total=max_epoch, unit_scale=1, disable=args.distributed) as pbar:
                     inputs, targets, top_batch_viterbi_decode)
 
                 history_validation["epoch"].append(epoch)
+                history_validation["sum_loss"].append(sum_loss)
                 history_validation["greedy_cer"].append(cer1)
                 history_validation["greedy_wer"].append(wer1)
                 history_validation["greedy_normalized_cer"].append(cern1)
@@ -1194,6 +1196,13 @@ with tqdm(total=max_epoch, unit_scale=1, disable=args.distributed) as pbar:
         # Create an empty file HALT_filename, mark the job as finished
         if epoch == max_epoch - 1:
             open(HALT_filename, 'a').close()
+
+
+# In[ ]:
+
+
+print(tabulate(history_training, headers="keys"), flush=True)
+print(tabulate(history_validation, headers="keys"), flush=True)
 
 
 # In[ ]:
@@ -1255,13 +1264,6 @@ plt.plot(history_validation["epoch"],
          history_validation["sum_loss"], label="validation")
 plt.yscale("log")
 plt.legend()
-
-
-# In[ ]:
-
-
-print(tabulate(history_training, headers="keys"), flush=True)
-print(tabulate(history_validation, headers="keys"), flush=True)
 
 
 # In[ ]:
