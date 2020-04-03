@@ -91,7 +91,7 @@ parser.add_argument('--dist-url', default='tcp://224.66.41.62:23456',
 parser.add_argument('--dist-backend', default='nccl',
                     type=str, help='distributed backend')
 parser.add_argument('--dataset', default='librispeech', type=str)
-parser.add_argument('--gradient', action="store_true", type=bool)
+parser.add_argument('--gradient', action="store_true")
 
 args = parser.parse_args()
 
