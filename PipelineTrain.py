@@ -94,6 +94,7 @@ parser.add_argument('--dataset', default='librispeech', type=str)
 parser.add_argument('--gradient', action="store_true")
 
 args = parser.parse_args()
+print(args, flush=True)
 
 
 # # Checkpoint
