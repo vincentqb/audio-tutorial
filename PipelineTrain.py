@@ -720,7 +720,7 @@ class LSTMModel(nn.Module):
         outputs, _ = self.layer(batch)
         # outputs = self.activation(outputs)
         # outputs: batch, seq_len, directions*num_features
-        # outputs = self.hidden2class(outputs)
+        outputs = self.hidden2class(outputs)
         # outputs: batch, seq_len, num_features
         # print(outputs.shape, flush=True)
         return nn.functional.log_softmax(outputs, dim=-1)
