@@ -43,8 +43,10 @@ if __name__ == '__main__':
 
 try:
     get_ipython().run_line_magic('matplotlib', 'inline')
+    in_notebook = True
 except NameError:
     matplotlib.use("Agg")
+    in_notebook = False
 
 # Empty CUDA cache
 torch.cuda.empty_cache()
@@ -93,8 +95,10 @@ parser.add_argument('--dist-backend', default='nccl',
 parser.add_argument('--dataset', default='librispeech', type=str)
 parser.add_argument('--gradient', action="store_true")
 
-args = parser.parse_args()
-print(args, flush=True)
+if in_notebook:
+    args, _ = parser.parse_known_args()
+else:
+    args = parser.parse_args()
 
 
 # # Checkpoint
