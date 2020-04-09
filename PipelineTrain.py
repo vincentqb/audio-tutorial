@@ -78,7 +78,7 @@ parser.add_argument('--arch', metavar='ARCH', default='wav2letter',
                     choices=["wav2letter", "lstm"], help='model architecture')
 parser.add_argument('--batch-size', default=64, type=int,
                     metavar='N', help='mini-batch size')
-parser.add_argument('--learning-rate', default=0.1, type=float,
+parser.add_argument('--learning-rate', default=1., type=float,
                     metavar='LR', help='initial learning rate')
 # parser.add_argument('--momentum', default=0.9, type=float, metavar='M', help='momentum')
 parser.add_argument('--weight-decay', default=1e-5,
@@ -219,7 +219,7 @@ batch_size = args.batch_size
 # batch_size = 512
 # batch_size = 256
 # batch_size = 64
-batch_size = args.batch_size
+# batch_size = 1
 
 training_percentage = 90.
 validation_percentage = 5.
@@ -271,21 +271,21 @@ mfcc = MFCC(sample_rate=sample_rate_original,
 # Optimizer
 
 optimizer_params_adadelta = {
-    "lr": 1.0,
-    "eps": 1e-8,
-    "rho": 0.95,
-    "weight_decay": 1e-5,
+    "lr": args.learning_rate,
+    "eps": args.eps,
+    "rho": args.rho,
+    "weight_decay": args.weight_decay,
 }
 
 optimizer_params_adam = {
-    "lr": .05,
-    "eps": 1e-8,
-    "weight_decay": .01,
+    "lr": args.learning_rate,
+    "eps": args.eps,
+    "weight_decay": args.weight_decay,
 }
 
 optimizer_params_sgd = {
-    "lr": .001,
-    "weight_decay": .0001,
+    "lr": args.learning_rate,
+    "weight_decay": args.weight_decay,
 }
 
 optimizer_params_adadelta = {
@@ -296,7 +296,7 @@ optimizer_params_adadelta = {
 }
 
 Optimizer = Adadelta
-optimizer_params = optimizer_params_adadelta
+optimizer_params = optimizer_params_sgd
 
 gamma = 0.95
 
@@ -306,8 +306,8 @@ gamma = 0.95
 num_features = n_mfcc if n_mfcc else 1
 
 lstm_params = {
-    "hidden_size": 1000,
-    "num_layers": 3,
+    "hidden_size": 600,
+    "num_layers": 2,
     "batch_first": False,
     "bidirectional": False,
     "dropout": 0.,
@@ -467,6 +467,29 @@ def process_datapoint(item):
     transformed = transformed.to("cpu")
     target = target.to("cpu")
     return transformed, target
+
+
+# In[ ]:
+
+
+def gives_error(d, i):
+    try:
+        d[i]
+        return False
+    except:
+        return True
+
+
+if False:
+    a = LIBRISPEECH(root, "dev-clean",
+                    folder_in_archive=folder_in_archive, download=False)
+    la = [i for i in range(len(a)) if gives_error(a, i)]
+    print(la)
+
+    b = LIBRISPEECH(root, "train-clean-100",
+                    folder_in_archive=folder_in_archive, download=False)
+    lb = [i for i in range(len(b)) if gives_error(b, i)]
+    print(lb)
 
 
 # In[ ]:
