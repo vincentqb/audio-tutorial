@@ -1071,6 +1071,8 @@ if args.resume and os.path.isfile(CHECKPOINT_filename):
     model.load_state_dict(checkpoint['state_dict'])
     optimizer.load_state_dict(checkpoint['optimizer'])
     scheduler.load_state_dict(checkpoint['scheduler'])
+    history_training = checkpoint['history_training']
+    history_validation = checkpoint['history_validation']
     print("=> loaded checkpoint '{}' (epoch {})".format(
         CHECKPOINT_filename, checkpoint['epoch']))
 else:
