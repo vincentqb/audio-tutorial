@@ -19,7 +19,7 @@ lr=$3
 export MASTER_ADDR=${SLURM_NODELIST:0:9}${SLURM_NODELIST:10:4}
 export MASTER_PORT=29500
 
-if ["$bs" -leq "8"]
+if [ "$bs" -le "8" ]
 then
     nodes=1
     gpus=1
