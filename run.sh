@@ -22,15 +22,6 @@ lr=$3
 export MASTER_ADDR=${SLURM_JOB_NODELIST:0:9}${SLURM_JOB_NODELIST:10:4}
 export MASTER_PORT=29500
 
-if [ "$bs" -le "8" ]
-then
-    nodes=1
-    gpus=1
-else
-    nodes=1
-    gpus=8
-fi
-
 srun --label \
     python /private/home/vincentqb/experiment/PipelineTrain.py \
 	--arch $arch --batch-size $bs --learning-rate $lr \
