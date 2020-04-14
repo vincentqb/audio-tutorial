@@ -4,6 +4,17 @@
 # In[ ]:
 
 
+# https://github.com/pytorch/pytorch/issues/13883
+
+import torch.multiprocessing as mp
+
+if __name__ == '__main__':
+    mp.set_start_method('forkserver')
+
+
+# In[ ]:
+
+
 import argparse
 import collections
 import cProfile
@@ -24,7 +35,6 @@ from io import StringIO
 import matplotlib
 import torch
 import torch.distributed as dist
-import torch.multiprocessing as mp
 import torchaudio
 from matplotlib import pyplot as plt
 from tabulate import tabulate
@@ -37,9 +47,6 @@ from torchaudio.transforms import MFCC, Resample
 from tqdm.notebook import tqdm as tqdm
 
 print("start time: {}".format(str(datetime.now())), flush=True)
-
-if __name__ == '__main__':
-    mp.set_start_method('forkserver')
 
 try:
     get_ipython().run_line_magic('matplotlib', 'inline')
@@ -101,7 +108,7 @@ if in_notebook:
 else:
     args = parser.parse_args()
 
-print(args)
+print(args, flush=True)
 
 
 # # Checkpoint
@@ -733,7 +740,7 @@ class LSTMModel(nn.Module):
         self.hidden2class = nn.Linear(directions*hidden_size, num_classes)
 
     def forward(self, batch):
-        # self.layer.flatten_parameters()
+        self.layer.flatten_parameters()
         # print("forward", flush=True)
         # batch: batch, num_features, seq_len
         # print(batch.shape, flush=True)
@@ -987,6 +994,7 @@ if not args.distributed:
 else:
     model.cuda()
     model = torch.nn.parallel.DistributedDataParallel(model)
+    # model = torch.nn.parallel.DistributedDataParallel(model, find_unused_parameters=True)
 
 model = model.to(device, non_blocking=non_blocking)
 print('model cuda', flush=True)
