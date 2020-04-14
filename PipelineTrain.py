@@ -94,6 +94,7 @@ parser.add_argument('--dist-backend', default='nccl',
                     type=str, help='distributed backend')
 parser.add_argument('--dataset', default='librispeech', type=str)
 parser.add_argument('--gradient', action="store_true")
+parser.add_argument('--jit', action="store_true")
 
 if in_notebook:
     args, _ = parser.parse_known_args()
@@ -978,7 +979,8 @@ def collate_fn(batch):
 # In[ ]:
 
 
-model = torch.jit.script(model)
+if args.jit:
+    model = torch.jit.script(model)
 
 if not args.distributed:
     model = torch.nn.DataParallel(model)
