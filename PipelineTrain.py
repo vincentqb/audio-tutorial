@@ -100,6 +100,8 @@ if in_notebook:
 else:
     args = parser.parse_args()
 
+print(args)
+
 
 # # Checkpoint
 
@@ -321,9 +323,6 @@ start_epoch = args.start_epoch
 max_epoch = args.epochs
 mod_epoch = args.print_freq
 
-dtstamp = datetime.now().strftime("%y%m%d.%H%M%S")
-print(dtstamp, flush=True)
-
 
 # # Text encoding
 
@@ -364,7 +363,7 @@ coder = Coder(labels)
 encode = coder.encode
 decode = coder.decode
 vocab_size = coder.length
-print(vocab_size, flush=True)
+print("vocab_size", vocab_size, flush=True)
 
 
 # # Dataset
