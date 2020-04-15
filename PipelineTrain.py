@@ -108,7 +108,8 @@ if in_notebook:
 else:
     args = parser.parse_args()
 
-print(args, flush=True)
+if 'SLURM_PROCID' not in os.environ or os.environ['SLURM_PROCID'] == '0':
+    print(args, flush=True)
 
 
 # # Checkpoint
@@ -183,17 +184,18 @@ def save_checkpoint(state, is_best, filename=CHECKPOINT_filename):
             os.rename(CHECKPOINT_tempfile, filename)
         if is_best:
             shutil.copyfile(filename, 'model_best.pth.tar')
-        print("Checkpoint done")
+        print("Checkpoint: saved")
 
 
 # # Distributed
 
-# In[ ]:
+# In[5]:
 
 
 # Use #nodes as world_size
 if 'SLURM_NNODES' in os.environ:
     args.world_size = int(os.environ['SLURM_NNODES'])
+
 args.distributed = args.world_size > 1
 
 if args.distributed:
@@ -1096,19 +1098,21 @@ history_training = defaultdict(list)
 history_validation = defaultdict(list)
 
 if args.resume and os.path.isfile(CHECKPOINT_filename):
-    print("=> loading checkpoint '{}'".format(CHECKPOINT_filename))
+    print("Checkpoint: loading '{}'".format(CHECKPOINT_filename))
     checkpoint = torch.load(CHECKPOINT_filename)
     start_epoch = checkpoint['epoch']
     best_loss = checkpoint['best_loss']
+    history_training = checkpoint['history_training']
+    history_validation = checkpoint['history_validation']
     model.load_state_dict(checkpoint['state_dict'])
     optimizer.load_state_dict(checkpoint['optimizer'])
     scheduler.load_state_dict(checkpoint['scheduler'])
-    history_training = checkpoint['history_training']
-    history_validation = checkpoint['history_validation']
-    print("=> loaded checkpoint '{}' (epoch {})".format(
+    print("Checkpoint: loaded '{}' at epoch {}".format(
         CHECKPOINT_filename, checkpoint['epoch']))
+    print(tabulate(history_training, headers="keys"), flush=True)
+    print(tabulate(history_validation, headers="keys"), flush=True)
 else:
-    print("=> no checkpoint found")
+    print("Checkpoint: not found")
     save_checkpoint({
         'epoch': start_epoch,
         'state_dict': model.state_dict(),
@@ -1138,12 +1142,12 @@ with tqdm(total=max_epoch, unit_scale=1, disable=args.distributed) as pbar:
             optimizer.zero_grad()
             loss.backward()
 
+            norm = 0.
             if clip_norm > 0:
                 norm = torch.nn.utils.clip_grad_norm_(
                     model.parameters(), clip_norm)
                 total_norm += norm
             elif args.gradient:
-                norm = 0.
                 for p in list(filter(lambda p: p.grad is not None, model.parameters())):
                     norm += p.grad.data.norm(2).item() ** 2
                 norm = norm ** .5
@@ -1165,8 +1169,9 @@ with tqdm(total=max_epoch, unit_scale=1, disable=args.distributed) as pbar:
 
             pbar.update(1/len(loader_training))
 
-        print(f"Epoch: {epoch:4}   Gradient: {total_norm:4.5f}", flush=True)
         total_norm = (total_norm ** .5) / len(loader_training)
+        if total_norm > 0:
+            print(f"Epoch: {epoch:4}   Gradient: {total_norm:4.5f}", flush=True)
 
         # Average loss
         sum_loss = sum_loss / len(loader_training)
@@ -1209,13 +1214,13 @@ with tqdm(total=max_epoch, unit_scale=1, disable=args.distributed) as pbar:
                 history_validation["epoch"].append(epoch)
                 history_validation["sum_loss"].append(sum_loss)
                 history_validation["greedy_cer"].append(cer1)
+                history_validation["greedy_cer_normalized"].append(cern1)
                 history_validation["greedy_wer"].append(wer1)
-                history_validation["greedy_normalized_cer"].append(cern1)
-                history_validation["greedy_normalized_wer"].append(wern1)
+                history_validation["greedy_wer_normalized"].append(wern1)
                 history_validation["viterbi_cer"].append(cer2)
+                history_validation["viterbi_cer_normalized"].append(cern2)
                 history_validation["viterbi_wer"].append(wer2)
-                history_validation["viterbi_normalized_cer"].append(cern2)
-                history_validation["viterbi_normalized_wer"].append(wern2)
+                history_validation["viterbi_wer_normalized"].append(wern2)
 
                 is_best = sum_loss < best_loss
                 best_loss = min(sum_loss, best_loss)
@@ -1228,6 +1233,8 @@ with tqdm(total=max_epoch, unit_scale=1, disable=args.distributed) as pbar:
                     'history_training': history_training,
                     'history_validation': history_validation,
                 }, is_best)
+                print(tabulate(history_training, headers="keys"), flush=True)
+                print(tabulate(history_validation, headers="keys"), flush=True)
 
         scheduler.step(sum_loss)
 

@@ -8,7 +8,7 @@
 #SBATCH --partition=learnfair
 #SBATCH --time=30:00:00
 #SBATCH --mem-per-cpu=5120
-#SBATCH --nodes=4
+#SBATCH --nodes=8
 #SBATCH --ntasks-per-node=1
 #SBATCH --gres=gpu:8
 #SBATCH --cpus-per-task=80
@@ -17,6 +17,8 @@
 arch=$1
 bs=$2
 lr=$3
+
+PYTHONWARNINGS='ignore:semaphore_tracker:UserWarning'
 
 # The ENV below are only used in distributed training with env:// initialization
 export MASTER_ADDR=${SLURM_JOB_NODELIST:0:9}${SLURM_JOB_NODELIST:10:4}
