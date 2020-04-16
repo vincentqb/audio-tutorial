@@ -309,7 +309,7 @@ optimizer_params_adadelta = {
 Optimizer = Adadelta
 optimizer_params = optimizer_params_sgd
 
-gamma = 0.95
+gamma = 0.96
 
 
 # Model
@@ -1034,8 +1034,8 @@ print('model cuda', flush=True)
 
 
 optimizer = Optimizer(model.parameters(), **optimizer_params)
-# scheduler = ExponentialLR(optimizer, gamma=gamma)
-scheduler = ReduceLROnPlateau(optimizer)
+scheduler = ExponentialLR(optimizer, gamma=gamma)
+# scheduler = ReduceLROnPlateau(optimizer)
 
 criterion = torch.nn.CTCLoss(zero_infinity=zero_infinity)
 # criterion = nn.MSELoss()
@@ -1209,15 +1209,15 @@ with tqdm(total=max_epoch, unit_scale=1, disable=args.distributed) as pbar:
         sum_loss = sum_loss / len(loader_training)
         sum_loss_str = f"Epoch: {epoch:4}   Train: {sum_loss:4.5f}"
 
-        # scheduler.step()
+        scheduler.step()
 
         history_training["epoch"].append(epoch)
         history_training["gradient_norm"].append(total_norm)
         history_training["sum_loss"].append(sum_loss)
 
-        with torch.no_grad():
+        if not epoch % mod_epoch or epoch == max_epoch - 1:
 
-            if not epoch % mod_epoch or epoch == max_epoch-1:
+            with torch.no_grad():
 
                 # Switch to evaluation mode
                 model.eval()
@@ -1268,12 +1268,13 @@ with tqdm(total=max_epoch, unit_scale=1, disable=args.distributed) as pbar:
 
                 print(tabulate(history_training, headers="keys"), flush=True)
                 print(tabulate(history_validation, headers="keys"), flush=True)
+                print(torch.cuda.memory_summary(), flush=True)
 
-        scheduler.step(sum_loss)
+                # scheduler.step(sum_loss)
 
-        # Create an empty file HALT_filename, mark the job as finished
-        if epoch == max_epoch - 1:
-            open(HALT_filename, 'a').close()
+    # Create an empty file HALT_filename, mark the job as finished
+    if epoch == max_epoch - 1:
+        open(HALT_filename, 'a').close()
 
 
 # In[ ]:
@@ -1340,7 +1341,7 @@ plt.legend()
 # In[ ]:
 
 
-# print(torch.cuda.memory_summary(), flush=True)
+print(torch.cuda.memory_summary(), flush=True)
 
 
 # In[ ]:
