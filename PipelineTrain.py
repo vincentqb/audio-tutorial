@@ -944,8 +944,15 @@ def levenshtein_distance(r, h):
 
 if args.arch == "wav2letter":
     model = Wav2Letter(num_features, vocab_size)
+
+    def model_length_function(tensor):
+        return int(tensor.shape[0])//2 + 1
+
 elif args.arch == "lstm":
     model = LSTMModel(num_features, vocab_size, **lstm_params)
+
+    def model_length_function(tensor):
+        return int(tensor.shape[0])
 
 
 # In[ ]:
@@ -958,17 +965,38 @@ def collate_fn(batch):
 
     tensors = [b[0] for b in batch if b]
 
-    for tensor in tensors:
-        shape = int(tensor.shape[0])
-        if shape not in shape_after_model:
-            tensor = tensor.t().unsqueeze(0)
-            output = model(tensor)
-            shape_after_model[shape] = int(output.shape[1])
+    if False:
+        for tensor in tensors:
+            shape = int(tensor.shape[0])
+            if shape not in shape_after_model:
+                tensor = tensor.t().unsqueeze(0)
 
-    tensors_lengths = torch.tensor(
-        [shape_after_model[int(t.shape[0])] for t in tensors], dtype=torch.long, device=tensors[0].device
-    )
+                training = model.training
+                model.eval()
+                output = model(tensor)
+                model.train(training)
 
+                shape_after_model[shape] = int(output.shape[1])
+
+        tensors_lengths = torch.tensor(
+            [shape_after_model[int(t.shape[0])] for t in tensors], dtype=torch.long, device=tensors[0].device
+        )
+        # print(tensors_lengths)
+
+    if True:
+        tensors_lengths = torch.tensor(
+            [model_length_function(t) for t in tensors], dtype=torch.long, device=tensors[0].device
+        )
+        # print(tensors_lengths)
+
+    if False:
+        # (batch, seq_len, num_directions * hidden_size)
+        tensors_lengths = torch.tensor(
+            [int(t.shape[-1]) for t in tensors], dtype=torch.long, device=tensors[0].device
+        )
+
+    # print([int(t.shape[0]) for t in tensors])
+    # print([shape_after_model[int(t.shape[0])] for t in tensors])
     tensors = torch.nn.utils.rnn.pad_sequence(tensors, batch_first=True)
     tensors = tensors.transpose(1, -1)
 
@@ -1246,13 +1274,6 @@ with tqdm(total=max_epoch, unit_scale=1, disable=args.distributed) as pbar:
         # Create an empty file HALT_filename, mark the job as finished
         if epoch == max_epoch - 1:
             open(HALT_filename, 'a').close()
-
-
-# In[ ]:
-
-
-print(tabulate(history_training, headers="keys"), flush=True)
-print(tabulate(history_validation, headers="keys"), flush=True)
 
 
 # In[ ]:
