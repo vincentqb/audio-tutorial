@@ -5,7 +5,6 @@
 
 
 # https://github.com/pytorch/pytorch/issues/13883
-
 import torch.multiprocessing as mp
 
 if __name__ == '__main__':
@@ -189,7 +188,7 @@ def save_checkpoint(state, is_best, filename=CHECKPOINT_filename):
 
 # # Distributed
 
-# In[5]:
+# In[ ]:
 
 
 # Use #nodes as world_size
@@ -1100,19 +1099,23 @@ history_validation = defaultdict(list)
 if args.resume and os.path.isfile(CHECKPOINT_filename):
     print("Checkpoint: loading '{}'".format(CHECKPOINT_filename))
     checkpoint = torch.load(CHECKPOINT_filename)
+
     start_epoch = checkpoint['epoch']
     best_loss = checkpoint['best_loss']
     history_training = checkpoint['history_training']
     history_validation = checkpoint['history_validation']
+
     model.load_state_dict(checkpoint['state_dict'])
     optimizer.load_state_dict(checkpoint['optimizer'])
     scheduler.load_state_dict(checkpoint['scheduler'])
+
     print("Checkpoint: loaded '{}' at epoch {}".format(
         CHECKPOINT_filename, checkpoint['epoch']))
     print(tabulate(history_training, headers="keys"), flush=True)
     print(tabulate(history_validation, headers="keys"), flush=True)
 else:
     print("Checkpoint: not found")
+
     save_checkpoint({
         'epoch': start_epoch,
         'state_dict': model.state_dict(),
@@ -1171,7 +1174,8 @@ with tqdm(total=max_epoch, unit_scale=1, disable=args.distributed) as pbar:
 
         total_norm = (total_norm ** .5) / len(loader_training)
         if total_norm > 0:
-            print(f"Epoch: {epoch:4}   Gradient: {total_norm:4.5f}", flush=True)
+            print(
+                f"Epoch: {epoch:4}   Gradient: {total_norm:4.5f}", flush=True)
 
         # Average loss
         sum_loss = sum_loss / len(loader_training)
@@ -1233,6 +1237,7 @@ with tqdm(total=max_epoch, unit_scale=1, disable=args.distributed) as pbar:
                     'history_training': history_training,
                     'history_validation': history_validation,
                 }, is_best)
+
                 print(tabulate(history_training, headers="keys"), flush=True)
                 print(tabulate(history_validation, headers="keys"), flush=True)
 
