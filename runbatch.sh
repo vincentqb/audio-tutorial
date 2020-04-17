@@ -12,7 +12,7 @@
 #SBATCH --ntasks-per-node=1
 #SBATCH --gres=gpu:8
 #SBATCH --cpus-per-task=80
-#SBATCH --array=1-16
+#SBATCH --array=1-18
 # number of CPUs = 2x (number of data workers + number of GPUs requested)
 
 if [[ "$SLURM_ARRAY_TASK_COUNT" -ne $((2 * 3 * 3)) ]]; then
