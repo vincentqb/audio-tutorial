@@ -98,6 +98,8 @@ parser.add_argument('--dist-url', default='tcp://224.66.41.62:23456',
                     type=str, help='url used to set up distributed training')
 parser.add_argument('--dist-backend', default='nccl',
                     type=str, help='distributed backend')
+parser.add_argument('--distributed', action="store_true")
+
 parser.add_argument('--dataset', default='librispeech', type=str)
 parser.add_argument('--gradient', action="store_true")
 parser.add_argument('--jit', action="store_true")
@@ -193,7 +195,7 @@ def save_checkpoint(state, is_best, filename=CHECKPOINT_filename):
 if 'SLURM_NNODES' in os.environ:
     args.world_size = int(os.environ['SLURM_NNODES'])
 
-args.distributed = args.world_size > 1
+args.distributed = args.distributed or args.world_size > 1
 
 if args.distributed:
     os.environ['RANK'] = os.environ['SLURM_PROCID']
@@ -1044,9 +1046,9 @@ def count_parameters(model):
 
 if not args.distributed or os.environ['SLURM_PROCID'] == '0':
     n = count_parameters(model)
-    print("Number of parameters: ", n, flush=True)
+    print(f"Number of parameters: {n}", flush=True)
     # Each float32 is 4 bytes.
-    print("Approximate space taken: ", n * 4 / (10 ** 6), flush=True)
+    print(f"Approximate space taken: {n * 4 / (10 ** 6):.1f}", flush=True)
 
 
 # In[ ]:
@@ -1105,8 +1107,9 @@ def forward_loss(inputs, targets, tensors_lengths, target_lengths):
     return criterion(outputs, targets, input_lengths, target_lengths)
 
 
-def forward_decode(output, targets, decoder):
+def forward_decode(inputs, targets, decoder):
 
+    inputs = inputs.to(device, non_blocking=True)
     output = model(inputs).to("cpu")
     output = decoder(output)
 
@@ -1140,6 +1143,7 @@ def forward_decode(output, targets, decoder):
 # In[ ]:
 
 
+history_loader = defaultdict(list)
 history_training = defaultdict(list)
 history_validation = defaultdict(list)
 
@@ -1179,6 +1183,7 @@ else:
 
 with tqdm(total=max_epoch, unit_scale=1, disable=args.distributed) as pbar:
     for epoch in range(start_epoch, max_epoch):
+        torch.cuda.reset_max_memory_allocated()
         model.train()
 
         sum_loss = 0.
@@ -1205,6 +1210,11 @@ with tqdm(total=max_epoch, unit_scale=1, disable=args.distributed) as pbar:
 
             optimizer.step()
 
+            memory = torch.cuda.max_memory_allocated()
+
+            history_loader["epoch"].append(pbar.n)
+            history_loader["memory"].append(memory)
+
             if SIGNAL_RECEIVED:
                 save_checkpoint({
                     'epoch': epoch,
@@ -1230,9 +1240,13 @@ with tqdm(total=max_epoch, unit_scale=1, disable=args.distributed) as pbar:
 
         scheduler.step()
 
+        memory = torch.cuda.max_memory_allocated()
+        print(f"memory after training: {memory}", flush=True)
+
         history_training["epoch"].append(epoch)
         history_training["gradient_norm"].append(total_norm)
         history_training["sum_loss"].append(sum_loss)
+        history_training["max_memory_allocated"].append(memory)
 
         if not epoch % mod_epoch or epoch == max_epoch - 1:
 
@@ -1262,6 +1276,9 @@ with tqdm(total=max_epoch, unit_scale=1, disable=args.distributed) as pbar:
                 cer2, wer2, cern2, wern2 = forward_decode(
                     inputs, targets, top_batch_viterbi_decode)
 
+                memory = torch.cuda.max_memory_allocated()
+                print(f"memory after validation: {memory}", flush=True)
+
                 history_validation["epoch"].append(epoch)
                 history_validation["sum_loss"].append(sum_loss)
                 history_validation["greedy_cer"].append(cer1)
@@ -1272,6 +1289,7 @@ with tqdm(total=max_epoch, unit_scale=1, disable=args.distributed) as pbar:
                 history_validation["viterbi_cer_normalized"].append(cern2)
                 history_validation["viterbi_wer"].append(wer2)
                 history_validation["viterbi_wer_normalized"].append(wern2)
+                history_validation["max_memory_allocated"].append(memory)
 
                 is_best = sum_loss < best_loss
                 best_loss = min(sum_loss, best_loss)
