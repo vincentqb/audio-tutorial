@@ -107,8 +107,6 @@ if in_notebook:
 else:
     args = parser.parse_args()
 
-if 'SLURM_PROCID' not in os.environ or os.environ['SLURM_PROCID'] == '0':
-    print(args, flush=True)
 
 
 # # Checkpoint
@@ -209,6 +207,13 @@ if args.distributed:
 
 
 # # Parameters
+
+# In[ ]:
+
+
+if not args.distributed or os.environ['SLURM_PROCID'] == '0':
+    print(args, flush=True)
+
 
 # In[ ]:
 
@@ -317,8 +322,8 @@ gamma = 0.96
 num_features = n_mfcc if n_mfcc else 1
 
 lstm_params = {
-    "hidden_size": 600,
-    "num_layers": 2,
+    "hidden_size": 800,
+    "num_layers": 5,
     "batch_first": False,
     "bidirectional": False,
     "dropout": 0.,
@@ -913,12 +918,12 @@ def top_batch_viterbi_decode(tag_sequence: torch.Tensor):
 # https://martin-thoma.com/word-error-rate-calculation/
 
 
-def levenshtein_distance(r, h):
+def levenshtein_distance(r, h, device=None):
 
     # initialisation
-    d = torch.zeros((len(r)+1, len(h)+1), dtype=torch.long)
-    d[0, :] = torch.arange(0, len(h)+1, dtype=torch.long)
-    d[:, 0] = torch.arange(0, len(r)+1, dtype=torch.long)
+    d = torch.zeros((len(r)+1, len(h)+1), dtype=torch.long, device=device)
+    d[0, :] = torch.arange(0, len(h)+1, dtype=torch.long, device=device)
+    d[:, 0] = torch.arange(0, len(r)+1, dtype=torch.long, device=device)
 
     # computation
     for i in range(1, len(r)+1):
@@ -1028,6 +1033,20 @@ else:
 model = model.to(device, non_blocking=non_blocking)
 print('model cuda', flush=True)
 # model.apply(weight_init)
+
+
+# In[ ]:
+
+
+def count_parameters(model):
+    return sum(p.numel() for p in model.parameters() if p.requires_grad)
+
+
+if not args.distributed or os.environ['SLURM_PROCID'] == '0':
+    n = count_parameters(model)
+    print("Number of parameters: ", n, flush=True)
+    # Each float32 is 4 bytes.
+    print("Approximate space taken: ", n * 4 / (10 ** 6), flush=True)
 
 
 # In[ ]:
