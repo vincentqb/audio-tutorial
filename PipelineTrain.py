@@ -42,6 +42,7 @@ from torch.optim import SGD, Adadelta, Adam
 from torch.optim.lr_scheduler import ExponentialLR, ReduceLROnPlateau
 from torch.utils.data import DataLoader
 from torchaudio.datasets import LIBRISPEECH, SPEECHCOMMANDS
+from torchaudio.datasets.utils import diskcache_iterator
 from torchaudio.transforms import MFCC, Resample
 from tqdm.notebook import tqdm as tqdm
 
@@ -108,7 +109,6 @@ if in_notebook:
     args, _ = parser.parse_known_args()
 else:
     args = parser.parse_args()
-
 
 
 # # Checkpoint
@@ -513,13 +513,21 @@ if False:
 def datasets_librispeech():
 
     def create(tag):
-        data = LIBRISPEECH(
-            root, tag, folder_in_archive=folder_in_archive, download=False)
+
+        if isinstance(tag, str):
+            data = LIBRISPEECH(
+                root, tag, folder_in_archive=folder_in_archive, download=False)
+        else:
+            data = torch.utils.data.ConcatDataset([LIBRISPEECH(
+                root, t, folder_in_archive=folder_in_archive, download=False) for t in tag])
+
         data = Processed(process_datapoint, data)
-        data = MapMemoryCache(data)
+        data = diskcache_iterator(data)
+        # data = MapMemoryCache(data)
         return data
 
-    return create("train-clean-100"), create("dev-clean"), None
+    # return create("train-clean-100"), create("dev-clean"), None
+    return create(["train-clean-100", "train-clean-360", "train-other-500"]), create(["dev-clean", "dev-other"]), None
 
 
 # In[ ]:
@@ -1317,40 +1325,75 @@ with tqdm(total=max_epoch, unit_scale=1, disable=args.distributed) as pbar:
 # In[ ]:
 
 
-plt.plot(history_validation["epoch"],
-         history_validation["greedy_cer"], label="greedy")
-plt.plot(history_validation["epoch"],
-         history_validation["viterbi_cer"], label="viterbi")
+print(tabulate(history_training, headers="keys"), flush=True)
+print(tabulate(history_validation, headers="keys"), flush=True)
+print(torch.cuda.memory_summary(), flush=True)
+
+
+# In[ ]:
+
+
+print(tabulate(history_loader, headers="keys"), flush=True)
+
+
+# In[ ]:
+
+
+plt.plot(history_loader["epoch"],
+         history_loader["memory"], label="memory")
+
+
+# In[ ]:
+
+
+history_validation["epoch"]
+
+
+# In[ ]:
+
+
+if "greedy_cer" in history_validation:
+    plt.plot(history_validation["epoch"],
+             history_validation["greedy_cer"], label="greedy")
+if "viterbi_cer" in history_validation:
+    plt.plot(history_validation["epoch"],
+             history_validation["viterbi_cer"], label="viterbi")
 plt.legend()
 
 
 # In[ ]:
 
 
-plt.plot(history_validation["epoch"],
-         history_validation["greedy_wer"], label="greedy")
-plt.plot(history_validation["epoch"],
-         history_validation["viterbi_wer"], label="viterbi")
+if "greedy_wer" in history_validation:
+    plt.plot(history_validation["epoch"],
+             history_validation["greedy_wer"], label="greedy")
+if "viterbi_wer" in history_validation:
+    plt.plot(history_validation["epoch"],
+             history_validation["viterbi_wer"], label="viterbi")
 plt.legend()
 
 
 # In[ ]:
 
 
-plt.plot(history_validation["epoch"],
-         history_validation["greedy_cer_normalized"], label="greedy")
-plt.plot(history_validation["epoch"],
-         history_validation["viterbi_cer_normalized"], label="viterbi")
+if "greedy_cer_normalized" in history_validation:
+    plt.plot(history_validation["epoch"],
+             history_validation["greedy_cer_normalized"], label="greedy")
+if "viterbi_cer_normalized" in history_validation:
+    plt.plot(history_validation["epoch"],
+             history_validation["viterbi_cer_normalized"], label="viterbi")
 plt.legend()
 
 
 # In[ ]:
 
 
-plt.plot(history_validation["epoch"],
-         history_validation["greedy_wer_normalized"], label="greedy")
-plt.plot(history_validation["epoch"],
-         history_validation["viterbi_wer_normalized"], label="viterbi")
+if "greedy_wer_normalized" in history_validation:
+    plt.plot(history_validation["epoch"],
+             history_validation["greedy_wer_normalized"], label="greedy")
+if "viterbi_wer_normalized" in history_validation:
+    plt.plot(history_validation["epoch"],
+             history_validation["viterbi_wer_normalized"], label="viterbi")
 plt.legend()
 
 
