@@ -925,6 +925,54 @@ def top_batch_viterbi_decode(tag_sequence: torch.Tensor):
 # In[ ]:
 
 
+def levenshtein_distance_list(r, h):
+
+    # initialisation
+    d = [[0] * (len(h)+1)] * (len(r)+1)
+
+    # computation
+    for i in range(1, len(r)+1):
+        for j in range(1, len(h)+1):
+
+            if r[i-1] == h[j-1]:
+                d[i].append(d[i-1][j-1])
+            else:
+                substitution = d[i-1][j-1] + 1
+                insertion = d[i][j-1] + 1
+                deletion = d[i-1][j] + 1
+                d[i].append(min(substitution, insertion, deletion))
+
+    return d[len(r)][len(h)]
+
+
+# In[ ]:
+
+
+def levenshtein_distance_list(r, h):
+
+    # initialisation
+    dold = [0] * (len(h)+1)
+
+    # computation
+    for i in range(1, len(r)+1):
+        dnew = [0]
+        for j in range(1, len(h)+1):
+            if r[i-1] == h[j-1]:
+                dnew.append(dold[j-1])
+            else:
+                substitution = dold[j-1] + 1
+                insertion = dnew[j-1] + 1
+                deletion = dold[j] + 1
+                dnew.append(min(substitution, insertion, deletion))
+
+        dold = dnew
+
+    return dnew[-1]
+
+
+# In[ ]:
+
+
 # https://martin-thoma.com/word-error-rate-calculation/
 
 
@@ -947,7 +995,7 @@ def levenshtein_distance(r, h, device=None):
                 deletion = d[i-1, j] + 1
                 d[i, j] = min(substitution, insertion, deletion)
 
-    dist = d[len(r)][len(h)].item()
+    dist = d[len(r), len(h)].item()
 
     return dist
 

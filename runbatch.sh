@@ -44,4 +44,4 @@ srun --label \
     python /private/home/vincentqb/experiment/PipelineTrain.py \
 	--arch $arch --batch-size $bs --learning-rate $lr \
 	--resume /private/home/vincentqb/experiment/checkpoint-$SLURM_JOB_ID-$arch-$bs-$lr.pth.tar \
-	--world-size $SLURM_JOB_NUM_NODES --dist-url 'env://' --dist-backend='nccl'
+	--distributed --world-size $SLURM_JOB_NUM_NODES --dist-url 'env://' --dist-backend='nccl'
