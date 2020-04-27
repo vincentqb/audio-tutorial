@@ -1104,7 +1104,7 @@ if not args.distributed or os.environ['SLURM_PROCID'] == '0':
     n = count_parameters(model)
     print(f"Number of parameters: {n}", flush=True)
     # Each float32 is 4 bytes.
-    print(f"Approximate space taken: {n * 4 / (10 ** 6):.1f}", flush=True)
+    print(f"Approximate space taken: {n * 4 / (10 ** 6):.1f} MB", flush=True)
 
 
 # In[ ]:
