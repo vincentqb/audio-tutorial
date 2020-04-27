@@ -16,7 +16,7 @@
 # number of CPUs = 2x (number of data workers + number of GPUs requested)
 
 if [[ "$SLURM_ARRAY_TASK_COUNT" -ne $((2 * 3 * 3)) ]]; then
-    echo "SLURM_ARRAY_TASK_COUNT incorrect"
+    echo "SLURM_ARRAY_TASK_COUNT = $SLURM_ARRAY_TASK_COUNT is incorrect"
     exit
 fi
 
