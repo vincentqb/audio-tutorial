@@ -104,6 +104,7 @@ parser.add_argument('--distributed', action="store_true")
 parser.add_argument('--dataset', default='librispeech', type=str)
 parser.add_argument('--gradient', action="store_true")
 parser.add_argument('--jit', action="store_true")
+parser.add_argument('--viterbi-decoder', action="store_true")
 
 if in_notebook:
     args, _ = parser.parse_known_args()
@@ -821,7 +822,10 @@ def build_transitions():
     return transitions
 
 
-transitions = build_transitions()
+if args.viterbi_decoder:
+    print("transitions: building", flush=True)
+    transitions = build_transitions()
+    print("transitions: done", flush=True)
 
 
 # In[ ]:
@@ -1328,24 +1332,26 @@ with tqdm(total=max_epoch, unit_scale=1, disable=args.distributed) as pbar:
                 cer1, wer1, cern1, wern1 = forward_decode(
                     inputs, targets, greedy_decode)
 
-                print("viterbi decoder", flush=True)
-                cer2, wer2, cern2, wern2 = forward_decode(
-                    inputs, targets, top_batch_viterbi_decode)
+                if args.viterbi_decoder:
+                    print("viterbi decoder", flush=True)
+                    cer2, wer2, cern2, wern2 = forward_decode(
+                        inputs, targets, top_batch_viterbi_decode)
 
                 memory = torch.cuda.max_memory_allocated()
                 print(f"memory after validation: {memory}", flush=True)
 
                 history_validation["epoch"].append(epoch)
+                history_validation["max_memory_allocated"].append(memory)
                 history_validation["sum_loss"].append(sum_loss)
                 history_validation["greedy_cer"].append(cer1)
                 history_validation["greedy_cer_normalized"].append(cern1)
                 history_validation["greedy_wer"].append(wer1)
                 history_validation["greedy_wer_normalized"].append(wern1)
-                history_validation["viterbi_cer"].append(cer2)
-                history_validation["viterbi_cer_normalized"].append(cern2)
-                history_validation["viterbi_wer"].append(wer2)
-                history_validation["viterbi_wer_normalized"].append(wern2)
-                history_validation["max_memory_allocated"].append(memory)
+                if args.viterbi_decoder:
+                    history_validation["viterbi_cer"].append(cer2)
+                    history_validation["viterbi_cer_normalized"].append(cern2)
+                    history_validation["viterbi_wer"].append(wer2)
+                    history_validation["viterbi_wer_normalized"].append(wern2)
 
                 is_best = sum_loss < best_loss
                 best_loss = min(sum_loss, best_loss)
