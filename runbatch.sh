@@ -15,8 +15,10 @@
 #SBATCH --array=1-3
 # number of CPUs = 2x (number of data workers + number of GPUs requested)
 
-if [[ "$SLURM_ARRAY_TASK_COUNT" -ne $((2 * 3 * 3)) ]]; then
-    echo "SLURM_ARRAY_TASK_COUNT = $SLURM_ARRAY_TASK_COUNT is incorrect"
+COUNT=$((1 * 1 * 3))
+
+if [[ "$SLURM_ARRAY_TASK_COUNT" -ne $COUNT ]]; then
+    echo "SLURM_ARRAY_TASK_COUNT = $SLURM_ARRAY_TASK_COUNT is not equal to $COUNT"
     exit
 fi
 
