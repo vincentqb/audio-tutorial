@@ -87,6 +87,8 @@ parser.add_argument('--batch-size', default=64, type=int,
                     metavar='N', help='mini-batch size')
 parser.add_argument('--learning-rate', default=1., type=float,
                     metavar='LR', help='initial learning rate')
+parser.add_argument('--gamma', default=.96, type=float,
+                    metavar='GAMMA', help='learning rate exponential decay constant')
 # parser.add_argument('--momentum', default=0.9, type=float, metavar='M', help='momentum')
 parser.add_argument('--weight-decay', default=1e-5,
                     type=float, metavar='W', help='weight decay')
@@ -316,9 +318,6 @@ optimizer_params_adadelta = {
 
 Optimizer = Adadelta
 optimizer_params = optimizer_params_sgd
-
-gamma = 0.96
-
 
 # Model
 
@@ -1115,8 +1114,8 @@ if not args.distributed or os.environ['SLURM_PROCID'] == '0':
 
 
 optimizer = Optimizer(model.parameters(), **optimizer_params)
-scheduler = ExponentialLR(optimizer, gamma=gamma)
-# scheduler = ReduceLROnPlateau(optimizer)
+scheduler = ExponentialLR(optimizer, gamma=args.gamma)
+# scheduler = ReduceLROnPlateau(optimizer, patience=2, threshold=1e-3)
 
 criterion = torch.nn.CTCLoss(zero_infinity=zero_infinity)
 # criterion = nn.MSELoss()
