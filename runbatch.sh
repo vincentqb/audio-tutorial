@@ -29,6 +29,8 @@ for arch in 'wav2letter'; do
             for gamma in .98 .99; do
                 if [[ "$i" == "$SLURM_ARRAY_TASK_ID" ]]; then break; fi
                 ((i++))
+            done
+            if [[ "$i" == "$SLURM_ARRAY_TASK_ID" ]]; then break; fi
         done
         if [[ "$i" == "$SLURM_ARRAY_TASK_ID" ]]; then break; fi
     done
