@@ -12,10 +12,10 @@
 #SBATCH --ntasks-per-node=1
 #SBATCH --gres=gpu:8
 #SBATCH --cpus-per-task=80
-#SBATCH --array=1-3
+#SBATCH --array=1-4
 # number of CPUs = 2x (number of data workers + number of GPUs requested)
 
-COUNT=$((1 * 1 * 3))
+COUNT=$((1 * 1 * 2 * 2))
 
 if [[ "$SLURM_ARRAY_TASK_COUNT" -ne $COUNT ]]; then
     echo "SLURM_ARRAY_TASK_COUNT = $SLURM_ARRAY_TASK_COUNT is not equal to $COUNT"
@@ -25,9 +25,10 @@ fi
 i=1
 for arch in 'wav2letter'; do
     for bs in 128; do
-        for lr in 1. .1 .01; do
-            if [[ "$i" == "$SLURM_ARRAY_TASK_ID" ]]; then break; fi
-            ((i++))
+        for lr in .5 .1; do
+            for gamma in .98 .99; do
+                if [[ "$i" == "$SLURM_ARRAY_TASK_ID" ]]; then break; fi
+                ((i++))
         done
         if [[ "$i" == "$SLURM_ARRAY_TASK_ID" ]]; then break; fi
     done
@@ -44,6 +45,6 @@ export MASTER_PORT=29500
 
 srun --label \
     python /private/home/vincentqb/experiment/PipelineTrain.py \
-	--arch $arch --batch-size $bs --learning-rate $lr \
+	--arch $arch --batch-size $bs --learning-rate $lr --gamma $gamma\
 	--resume /private/home/vincentqb/experiment/checkpoint-$SLURM_JOB_ID-$arch-$bs-$lr.pth.tar
 	# --distributed --world-size $SLURM_JOB_NUM_NODES --dist-url 'env://' --dist-backend='nccl'
