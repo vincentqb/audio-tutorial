@@ -22,22 +22,34 @@ if [[ "$SLURM_ARRAY_TASK_COUNT" -ne $COUNT ]]; then
     exit
 fi
 
-i=1
-for arch in 'wav2letter'; do
-    for bs in 128; do
-        for lr in .5 .1; do
-            for gamma in .98 .99; do
-                if [[ "$i" == "$SLURM_ARRAY_TASK_ID" ]]; then break; fi
-                ((i++))
-            done
-            if [[ "$i" == "$SLURM_ARRAY_TASK_ID" ]]; then break; fi
-        done
-        if [[ "$i" == "$SLURM_ARRAY_TASK_ID" ]]; then break; fi
-    done
-    if [[ "$i" == "$SLURM_ARRAY_TASK_ID" ]]; then break; fi
-done
+archs=('wav2letter')
+bss=(128)
+lrs=(.5 .1)
+gammas=(.98 .99)
 
-echo $SLURM_JOB_ID $arch $bs $lr
+i=$SLURM_ARRAY_TASK_ID
+
+l=${#archs[@]}
+j=$(($i % $l))
+i=$(($i / $l))
+arch=${archs[$j]}
+
+l=${#bss[@]}
+j=$(($i % $l))
+i=$(($i / $l))
+bs=${bss[$j]}
+
+l=${#lrs[@]}
+j=$(($i % $l))
+i=$(($i / $l))
+lr=${lrs[$j]}
+
+l=${#gammas[@]}
+j=$(($i % $l))
+i=$(($i / $l))
+gamma=${gammas[$j]}
+
+echo $SLURM_JOB_ID $arch $bs $lr $gamma
 
 # The ENV below are only used in distributed training with env:// initialization
 export MASTER_ADDR=${SLURM_JOB_NODELIST:0:9}${SLURM_JOB_NODELIST:10:4}
