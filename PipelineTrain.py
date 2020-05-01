@@ -96,6 +96,9 @@ parser.add_argument('--weight-decay', default=1e-5,
 parser.add_argument("--eps", metavar='EPS', type=float, default=1e-8)
 parser.add_argument("--rho", metavar='RHO', type=float, default=.95)
 
+parser.add_argument('--n-bins', default=13, type=int,
+                    metavar='N', help='number of bins in transforms')
+
 parser.add_argument('--world-size', default=1, type=int,
                     help='number of distributed processes')
 parser.add_argument('--dist-url', default='tcp://224.66.41.62:23456',
@@ -276,18 +279,22 @@ labels = [char_null + char_pad + char_apostrophe + string.ascii_lowercase]
 
 sample_rate_original = 16000
 sample_rate_new = 8000
-# resample = Resample(sample_rate_original, sample_rate_new).to(device)
-resample = None
 
-n_mfcc = 13
+n_bins = args.n_bins  # 13, 128
 melkwargs = {
     'n_fft': 512,
     'n_mels': 20,
     'hop_length': 80,  # (160, 80)
 }
-mfcc = MFCC(sample_rate=sample_rate_original,
-            n_mfcc=n_mfcc, melkwargs=melkwargs).to(device)
-# mfcc = None
+
+transforms = nn.Sequential(
+    # torchaudio.transforms.Resample(sample_rate_original, sample_rate_new),
+    # torchaudio.transforms.MFCC(sample_rate=sample_rate_original, n_mfcc=n_bins, melkwargs=melkwargs),
+    torchaudio.transforms.MelSpectrogram(
+        sample_rate=sample_rate_original, n_mels=n_bins),
+    # torchaudio.transforms.FrequencyMasking(freq_mask_param=n_bins),
+    # torchaudio.transforms.TimeMasking(time_mask_param=35)
+)
 
 
 # Optimizer
@@ -322,7 +329,7 @@ optimizer_params = optimizer_params_sgd
 
 # Model
 
-num_features = n_mfcc if n_mfcc else 1
+num_features = n_bins if n_bins else 1
 
 lstm_params = {
     "hidden_size": 800,
@@ -598,18 +605,13 @@ class Processed(torch.utils.data.Dataset):
 
 
 # @torch.jit.script
+
+
 def process_datapoint(item):
-    transformed = item[0].to(device, non_blocking=non_blocking)
-    target = item[2].lower().replace(char_space, char_pad)
+    transformed = item[0]  # .to(device, non_blocking=non_blocking)
+    target = item[2].lower()
 
-    # apply mfcc, tranpose for pad_sequence
-    if resample is not None:
-        transformed = resample(transformed)
-
-    if mfcc is not None:
-        transformed = mfcc(transformed)
-    else:
-        transformed = transformed.unsqueeze(1)
+    transformed = transforms(transformed)
 
     transformed = transformed[0, ...].transpose(0, -1)
 
