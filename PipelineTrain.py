@@ -263,16 +263,15 @@ non_blocking = True
 
 # text preprocessing
 
-char_null = "-"
+char_blank = "*"
 char_space = " "
-char_pad = "*"
 char_apostrophe = "'"
 
-labels = [char_null + char_pad + char_apostrophe + string.ascii_lowercase]
+labels = char_blank + char_space + char_apostrophe + string.ascii_lowercase
 
 # excluded_dir = ["_background_noise_"]
 # folder_speechcommands = './SpeechCommands/speech_commands_v0.02'
-# labels = [char_null, char_pad] + [d for d in next(os.walk(folder_speechcommands))[1] if d not in excluded_dir]
+# labels = [char_blank, char_space] + [d for d in next(os.walk(folder_speechcommands))[1] if d not in excluded_dir]
 
 
 # audio
@@ -1108,7 +1107,8 @@ optimizer = Optimizer(model.parameters(), **optimizer_params)
 scheduler = ExponentialLR(optimizer, gamma=args.gamma)
 # scheduler = ReduceLROnPlateau(optimizer, patience=2, threshold=1e-3)
 
-criterion = torch.nn.CTCLoss(zero_infinity=zero_infinity)
+criterion = torch.nn.CTCLoss(
+    blank=coder.mapping[char_blank], zero_infinity=zero_infinity)
 # criterion = nn.MSELoss()
 # criterion = torch.nn.NLLLoss()
 
