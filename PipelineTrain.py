@@ -918,6 +918,35 @@ def top_batch_viterbi_decode(tag_sequence: torch.Tensor):
 # In[ ]:
 
 
+from array import array
+
+
+def levenshtein_distance_array(r, h):
+
+    # initialisation
+    dnew = array('d', [0] * (len(h)+1))
+    dold = array('d', [0] * (len(h)+1))
+
+    # computation
+    for i in range(1, len(r)+1):
+        for j in range(1, len(h)+1):
+
+            if r[i-1] == h[j-1]:
+                dnew[j] = dold[j-1]
+            else:
+                substitution = dold[j-1] + 1
+                insertion = dnew[j-1] + 1
+                deletion = dold[j] + 1
+                dnew[j] = min(substitution, insertion, deletion)
+
+        dnew, dold = dold, dnew
+
+    return dnew[-1]
+
+
+# In[ ]:
+
+
 def levenshtein_distance_list(r, h):
 
     # initialisation
@@ -941,56 +970,58 @@ def levenshtein_distance_list(r, h):
 # In[ ]:
 
 
-def levenshtein_distance_list(r, h):
+# https://martin-thoma.com/word-error-rate-calculation/
+from typing import Optional
+
+
+def levenshtein_distance(r: str, h: str, device: Optional[str] = None):
 
     # initialisation
-    dold = [0] * (len(h)+1)
+    d = torch.zeros((2, len(h)+1), dtype=torch.long)  # , device=device)
+    dold = 0
+    dnew = 1
 
     # computation
     for i in range(1, len(r)+1):
-        dnew = [0]
+        d[dnew, 0] = 0
         for j in range(1, len(h)+1):
+
             if r[i-1] == h[j-1]:
-                dnew.append(dold[j-1])
+                d[dnew, j] = d[dnew-1, j-1]
             else:
-                substitution = dold[j-1] + 1
-                insertion = dnew[j-1] + 1
-                deletion = dold[j] + 1
-                dnew.append(min(substitution, insertion, deletion))
+                substitution = d[dnew-1, j-1] + 1
+                insertion = d[dnew, j-1] + 1
+                deletion = d[dnew-1, j] + 1
+                d[dnew, j] = min(substitution, insertion, deletion)
 
-        dold = dnew
+        dnew, dold = dold, dnew
 
-    return dnew[-1]
+    dist = d[dnew, -1].item()
+
+    return dist
 
 
 # In[ ]:
 
 
-# https://martin-thoma.com/word-error-rate-calculation/
+if False:
+    r = "abcdddee"
+    h = "abcddde"
 
+    get_ipython().run_line_magic('timeit', 'levenshtein_distance(r, h)')
 
-def levenshtein_distance(r, h, device=None):
+    jitted = torch.jit.script(levenshtein_distance)
+    get_ipython().run_line_magic('timeit', 'jitted(r, h)')
 
-    # initialisation
-    d = torch.zeros((len(r)+1, len(h)+1), dtype=torch.long, device=device)
-    d[0, :] = torch.arange(0, len(h)+1, dtype=torch.long, device=device)
-    d[:, 0] = torch.arange(0, len(r)+1, dtype=torch.long, device=device)
+    get_ipython().run_line_magic('timeit', 'levenshtein_distance_list(r, h)')
 
-    # computation
-    for i in range(1, len(r)+1):
-        for j in range(1, len(h)+1):
+    jitted = torch.jit.script(levenshtein_distance_list)
+    # %timeit jitted(r, h)
 
-            if r[i-1] == h[j-1]:
-                d[i, j] = d[i-1, j-1]
-            else:
-                substitution = d[i-1, j-1] + 1
-                insertion = d[i, j-1] + 1
-                deletion = d[i-1, j] + 1
-                d[i, j] = min(substitution, insertion, deletion)
+    get_ipython().run_line_magic('timeit', 'levenshtein_distance_array(r, h)')
 
-    dist = d[len(r), len(h)].item()
-
-    return dist
+    jitted = torch.jit.script(levenshtein_distance_array)
+    # %timeit jitted(r, h)
 
 
 # # Train
@@ -998,61 +1029,14 @@ def levenshtein_distance(r, h, device=None):
 # In[ ]:
 
 
-if args.arch == "wav2letter":
-    model = Wav2Letter(num_features, vocab_size)
-
-    def model_length_function(tensor):
-        return int(tensor.shape[0])//2 + 1
-
-elif args.arch == "lstm":
-    model = LSTMModel(num_features, vocab_size, **lstm_params)
-
-    def model_length_function(tensor):
-        return int(tensor.shape[0])
-
-
-# In[ ]:
-
-
-shape_after_model = {}
-
-
 def collate_fn(batch):
 
     tensors = [b[0] for b in batch if b]
 
-    if False:
-        for tensor in tensors:
-            shape = int(tensor.shape[0])
-            if shape not in shape_after_model:
-                tensor = tensor.t().unsqueeze(0)
+    tensors_lengths = torch.tensor(
+        [model_length_function(t) for t in tensors], dtype=torch.long, device=tensors[0].device
+    )
 
-                training = model.training
-                model.eval()
-                output = model(tensor)
-                model.train(training)
-
-                shape_after_model[shape] = int(output.shape[1])
-
-        tensors_lengths = torch.tensor(
-            [shape_after_model[int(t.shape[0])] for t in tensors], dtype=torch.long, device=tensors[0].device
-        )
-        # print(tensors_lengths)
-
-    if True:
-        tensors_lengths = torch.tensor(
-            [model_length_function(t) for t in tensors], dtype=torch.long, device=tensors[0].device
-        )
-        # print(tensors_lengths)
-
-    if False:
-        # (batch, seq_len, num_directions * hidden_size)
-        tensors_lengths = torch.tensor(
-            [int(t.shape[-1]) for t in tensors], dtype=torch.long, device=tensors[0].device
-        )
-
-    # print([int(t.shape[0]) for t in tensors])
-    # print([shape_after_model[int(t.shape[0])] for t in tensors])
     tensors = torch.nn.utils.rnn.pad_sequence(tensors, batch_first=True)
     tensors = tensors.transpose(1, -1)
 
@@ -1061,9 +1045,6 @@ def collate_fn(batch):
         [target.shape[0] for target in targets], dtype=torch.long, device=tensors.device
     )
     targets = torch.nn.utils.rnn.pad_sequence(targets, batch_first=True)
-
-    # print(targets.shape, flush=True)
-    # print(decode(targets.tolist()), flush=True)
 
     return tensors, targets, tensors_lengths, target_lengths
 
