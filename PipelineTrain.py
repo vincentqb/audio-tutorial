@@ -336,10 +336,6 @@ clip_norm = 0.  # 10.
 
 zero_infinity = False
 
-start_epoch = args.start_epoch
-max_epoch = args.epochs
-mod_epoch = args.print_freq
-
 
 # # Text encoding
 
@@ -348,7 +344,7 @@ mod_epoch = args.print_freq
 
 class Coder:
     def __init__(self, labels):
-        labels = list(collections.OrderedDict.fromkeys(list("".join(labels))))
+        labels = [l for l in labels]
         self.length = len(labels)
         enumerated = list(enumerate(labels))
         flipped = [(sub[1], sub[0]) for sub in enumerated]
@@ -356,24 +352,23 @@ class Coder:
         d1 = collections.OrderedDict(enumerated)
         d2 = collections.OrderedDict(flipped)
         self.mapping = {**d1, **d2}
-        self.mapping[char_space] = self.mapping[char_pad]
-
-    def _map(self, iterable):
-        # iterable to iterable
-        return [self.mapping[i] for i in iterable]
 
     def encode(self, iterable):
-        if isinstance(iterable[0], list):
+        if isinstance(iterable, list):
             return [self.encode(i) for i in iterable]
         else:
-            return self._map(iterable)
+            return [self.mapping[i] + self.mapping[char_blank] for i in iterable]
 
     def decode(self, tensor):
         if isinstance(tensor[0], list):
             return [self.decode(t) for t in tensor]
         else:
             # not idempotent, since clean string
-            return "".join(self._map(tensor)).replace(char_null, "").replace(char_pad, char_space).strip()
+            x = (self.mapping[i] for i in tensor)
+            x = ''.join(i for i, _ in itertools.groupby(x))
+            x = x.replace(char_blank, "")
+            # x = x.strip()
+            return x
 
 
 coder = Coder(labels)
@@ -381,6 +376,148 @@ encode = coder.encode
 decode = coder.decode
 vocab_size = coder.length
 print("vocab_size", vocab_size, flush=True)
+
+
+# # Model
+# 
+# [Wav2Letter](https://github.com/LearnedVector/Wav2Letter/blob/master/Google%20Speech%20Command%20Example.ipynb)
+
+# In[ ]:
+
+
+def weight_init(m):
+    if isinstance(m, nn.Linear):
+        size = m.weight.size()
+        fan_out = size[0]  # number of rows
+        fan_in = size[1]  # number of columns
+        variance = math.sqrt(2.0/(fan_in + fan_out))
+        m.weight.data.normal_(0.0, variance)
+
+
+class PrintLayer(nn.Module):
+    def __init__(self):
+        super().__init__()
+
+    def forward(self, x):
+        print(x, flush=True)
+        return x
+
+
+class Wav2Letter(nn.Module):
+    """Wav2Letter Speech Recognition model
+        https://arxiv.org/pdf/1609.03193.pdf
+        This specific architecture accepts mfcc or power spectrums speech signals
+
+        Args:
+            num_features (int): number of mfcc features
+            num_classes (int): number of unique grapheme class labels
+    """
+
+    def __init__(self, num_features, num_classes):
+        super().__init__()
+
+        # Conv1d(in_channels, out_channels, kernel_size, stride)
+        self.layers = nn.Sequential(
+            nn.Conv1d(in_channels=num_features, out_channels=250,
+                      kernel_size=48, stride=2, padding=23),
+            nn.ReLU(inplace=True),
+            nn.Conv1d(in_channels=250, out_channels=250,
+                      kernel_size=7, stride=1, padding=3),
+            nn.ReLU(inplace=True),
+            nn.Conv1d(in_channels=250, out_channels=250,
+                      kernel_size=7, stride=1, padding=3),
+            nn.ReLU(inplace=True),
+            nn.Conv1d(in_channels=250, out_channels=250,
+                      kernel_size=7, stride=1, padding=3),
+            nn.ReLU(inplace=True),
+            nn.Conv1d(in_channels=250, out_channels=250,
+                      kernel_size=7, stride=1, padding=3),
+            nn.ReLU(inplace=True),
+            nn.Conv1d(in_channels=250, out_channels=250,
+                      kernel_size=7, stride=1, padding=3),
+            nn.ReLU(inplace=True),
+            nn.Conv1d(in_channels=250, out_channels=250,
+                      kernel_size=7, stride=1, padding=3),
+            nn.ReLU(inplace=True),
+            nn.Conv1d(in_channels=250, out_channels=250,
+                      kernel_size=7, stride=1, padding=3),
+            nn.ReLU(inplace=True),
+            nn.Conv1d(in_channels=250, out_channels=2000,
+                      kernel_size=32, stride=1, padding=16),
+            nn.ReLU(inplace=True),
+            nn.Conv1d(in_channels=2000, out_channels=2000,
+                      kernel_size=1, stride=1, padding=0),
+            nn.ReLU(inplace=True),
+            nn.Conv1d(in_channels=2000, out_channels=num_classes,
+                      kernel_size=1, stride=1, padding=0),
+            nn.ReLU(inplace=True),
+        )
+
+    def forward(self, batch):
+        """Forward pass through Wav2Letter network than
+            takes log probability of output
+        Args:
+            batch (int): mini batch of data
+            shape (batch, num_features, frame_len)
+        Returns:
+            Tensor with shape (batch_size, num_classes, output_len)
+        """
+        # batch: (batch_size, num_features, seq_len)
+        y_pred = self.layers(batch)
+        # y_pred: (batch_size, num_classes, output_len)
+        y_pred = y_pred.transpose(-1, -2)
+        # y_pred: (batch_size, output_len, num_classes)
+        return nn.functional.log_softmax(y_pred, dim=-1)
+
+
+# In[ ]:
+
+
+class LSTMModel(nn.Module):
+
+    def __init__(self, num_features, num_classes, hidden_size, num_layers, bidirectional, dropout, batch_first):
+        super().__init__()
+
+        directions = bidirectional + 1
+
+        self.layer = nn.LSTM(
+            num_features, hidden_size=hidden_size,
+            num_layers=num_layers, bidirectional=bidirectional, dropout=dropout, batch_first=batch_first
+        )
+        # self.activation = nn.ReLU(inplace=True)
+        self.hidden2class = nn.Linear(directions*hidden_size, num_classes)
+
+    def forward(self, batch):
+        self.layer.flatten_parameters()
+        # print("forward", flush=True)
+        # batch: batch, num_features, seq_len
+        # print(batch.shape, flush=True)
+        batch = batch.transpose(-1, -2).contiguous()
+        # batch: batch, seq_len, num_features
+        # print(batch.shape, flush=True)
+        outputs, _ = self.layer(batch)
+        # outputs = self.activation(outputs)
+        # outputs: batch, seq_len, directions*num_features
+        outputs = self.hidden2class(outputs)
+        # outputs: batch, seq_len, num_features
+        # print(outputs.shape, flush=True)
+        return nn.functional.log_softmax(outputs, dim=-1)
+
+
+# In[ ]:
+
+
+if args.arch == "wav2letter":
+    model = Wav2Letter(num_features, vocab_size)
+
+    def model_length_function(tensor):
+        return int(tensor.shape[0])//2 + 1
+
+elif args.arch == "lstm":
+    model = LSTMModel(num_features, vocab_size, **lstm_params)
+
+    def model_length_function(tensor):
+        return int(tensor.shape[0])
 
 
 # # Dataset
@@ -480,32 +617,9 @@ def process_datapoint(item):
     target = encode(target)
     target = torch.tensor(target, dtype=torch.long, device=transformed.device)
 
-    transformed = transformed.to("cpu")
-    target = target.to("cpu")
+    transformed = transformed  # .to("cpu")
+    target = target  # .to("cpu")
     return transformed, target
-
-
-# In[ ]:
-
-
-def gives_error(d, i):
-    try:
-        d[i]
-        return False
-    except:
-        return True
-
-
-if False:
-    a = LIBRISPEECH(root, "dev-clean",
-                    folder_in_archive=folder_in_archive, download=False)
-    la = [i for i in range(len(a)) if gives_error(a, i)]
-    print(la)
-
-    b = LIBRISPEECH(root, "train-clean-100",
-                    folder_in_archive=folder_in_archive, download=False)
-    lb = [i for i in range(len(b)) if gives_error(b, i)]
-    print(lb)
 
 
 # In[ ]:
@@ -645,132 +759,6 @@ if False:
         fn = "sound.wav"
         torchaudio.save(fn, waveform, sample_rate_new)
         ipd.Audio(fn)
-
-
-# # Model
-# 
-# [Wav2Letter](https://github.com/LearnedVector/Wav2Letter/blob/master/Google%20Speech%20Command%20Example.ipynb)
-
-# In[ ]:
-
-
-def weight_init(m):
-    if isinstance(m, nn.Linear):
-        size = m.weight.size()
-        fan_out = size[0]  # number of rows
-        fan_in = size[1]  # number of columns
-        variance = math.sqrt(2.0/(fan_in + fan_out))
-        m.weight.data.normal_(0.0, variance)
-
-
-class PrintLayer(nn.Module):
-    def __init__(self):
-        super().__init__()
-
-    def forward(self, x):
-        print(x, flush=True)
-        return x
-
-
-class Wav2Letter(nn.Module):
-    """Wav2Letter Speech Recognition model
-        https://arxiv.org/pdf/1609.03193.pdf
-        This specific architecture accepts mfcc or power spectrums speech signals
-
-        Args:
-            num_features (int): number of mfcc features
-            num_classes (int): number of unique grapheme class labels
-    """
-
-    def __init__(self, num_features, num_classes):
-        super().__init__()
-
-        # Conv1d(in_channels, out_channels, kernel_size, stride)
-        self.layers = nn.Sequential(
-            nn.Conv1d(in_channels=num_features, out_channels=250,
-                      kernel_size=48, stride=2, padding=23),
-            nn.ReLU(inplace=True),
-            nn.Conv1d(in_channels=250, out_channels=250,
-                      kernel_size=7, stride=1, padding=3),
-            nn.ReLU(inplace=True),
-            nn.Conv1d(in_channels=250, out_channels=250,
-                      kernel_size=7, stride=1, padding=3),
-            nn.ReLU(inplace=True),
-            nn.Conv1d(in_channels=250, out_channels=250,
-                      kernel_size=7, stride=1, padding=3),
-            nn.ReLU(inplace=True),
-            nn.Conv1d(in_channels=250, out_channels=250,
-                      kernel_size=7, stride=1, padding=3),
-            nn.ReLU(inplace=True),
-            nn.Conv1d(in_channels=250, out_channels=250,
-                      kernel_size=7, stride=1, padding=3),
-            nn.ReLU(inplace=True),
-            nn.Conv1d(in_channels=250, out_channels=250,
-                      kernel_size=7, stride=1, padding=3),
-            nn.ReLU(inplace=True),
-            nn.Conv1d(in_channels=250, out_channels=250,
-                      kernel_size=7, stride=1, padding=3),
-            nn.ReLU(inplace=True),
-            nn.Conv1d(in_channels=250, out_channels=2000,
-                      kernel_size=32, stride=1, padding=16),
-            nn.ReLU(inplace=True),
-            nn.Conv1d(in_channels=2000, out_channels=2000,
-                      kernel_size=1, stride=1, padding=0),
-            nn.ReLU(inplace=True),
-            nn.Conv1d(in_channels=2000, out_channels=num_classes,
-                      kernel_size=1, stride=1, padding=0),
-            nn.ReLU(inplace=True),
-        )
-
-    def forward(self, batch):
-        """Forward pass through Wav2Letter network than
-            takes log probability of output
-        Args:
-            batch (int): mini batch of data
-            shape (batch, num_features, frame_len)
-        Returns:
-            Tensor with shape (batch_size, num_classes, output_len)
-        """
-        # batch: (batch_size, num_features, seq_len)
-        y_pred = self.layers(batch)
-        # y_pred: (batch_size, num_classes, output_len)
-        y_pred = y_pred.transpose(-1, -2)
-        # y_pred: (batch_size, output_len, num_classes)
-        return nn.functional.log_softmax(y_pred, dim=-1)
-
-
-# In[ ]:
-
-
-class LSTMModel(nn.Module):
-
-    def __init__(self, num_features, num_classes, hidden_size, num_layers, bidirectional, dropout, batch_first):
-        super().__init__()
-
-        directions = bidirectional + 1
-
-        self.layer = nn.LSTM(
-            num_features, hidden_size=hidden_size,
-            num_layers=num_layers, bidirectional=bidirectional, dropout=dropout, batch_first=batch_first
-        )
-        # self.activation = nn.ReLU(inplace=True)
-        self.hidden2class = nn.Linear(directions*hidden_size, num_classes)
-
-    def forward(self, batch):
-        self.layer.flatten_parameters()
-        # print("forward", flush=True)
-        # batch: batch, num_features, seq_len
-        # print(batch.shape, flush=True)
-        batch = batch.transpose(-1, -2).contiguous()
-        # batch: batch, seq_len, num_features
-        # print(batch.shape, flush=True)
-        outputs, _ = self.layer(batch)
-        # outputs = self.activation(outputs)
-        # outputs: batch, seq_len, directions*num_features
-        outputs = self.hidden2class(outputs)
-        # outputs: batch, seq_len, num_features
-        # print(outputs.shape, flush=True)
-        return nn.functional.log_softmax(outputs, dim=-1)
 
 
 # # Word Decoder
@@ -1177,10 +1165,11 @@ def forward_decode(inputs, targets, decoder):
     target = decode(targets.tolist())
 
     print_length = 20
-    output_print = output[0].ljust(print_length)[:print_length]
-    target_print = target[0].ljust(print_length)[:print_length]
-    print(
-        f"Epoch: {epoch:4}   Target: {target_print}   Output: {output_print}", flush=True)
+    for i in range(20):
+        output_print = output[i].ljust(print_length)[:print_length]
+        target_print = target[i].ljust(print_length)[:print_length]
+        print(
+            f"Epoch: {epoch:4}   Target: {target_print}   Output: {output_print}", flush=True)
 
     cers = [levenshtein_distance(a, b) for a, b in zip(target, output)]
     cers_normalized = [d/len(a) for a, d in zip(target, cers)]
@@ -1211,7 +1200,7 @@ if args.resume and os.path.isfile(CHECKPOINT_filename):
     print("Checkpoint: loading '{}'".format(CHECKPOINT_filename))
     checkpoint = torch.load(CHECKPOINT_filename)
 
-    start_epoch = checkpoint['epoch']
+    args.start_epoch = checkpoint['epoch']
     best_loss = checkpoint['best_loss']
     history_training = checkpoint['history_training']
     history_validation = checkpoint['history_validation']
@@ -1228,7 +1217,7 @@ else:
     print("Checkpoint: not found")
 
     save_checkpoint({
-        'epoch': start_epoch,
+        'epoch': args.start_epoch,
         'state_dict': model.state_dict(),
         'best_loss': best_loss,
         'optimizer': optimizer.state_dict(),
@@ -1241,8 +1230,8 @@ else:
 # In[ ]:
 
 
-with tqdm(total=max_epoch, unit_scale=1, disable=args.distributed) as pbar:
-    for epoch in range(start_epoch, max_epoch):
+with tqdm(total=args.epochs, unit_scale=1, disable=args.distributed) as pbar:
+    for epoch in range(args.start_epoch, args.epochs):
         torch.cuda.reset_max_memory_allocated()
         model.train()
 
@@ -1272,7 +1261,8 @@ with tqdm(total=max_epoch, unit_scale=1, disable=args.distributed) as pbar:
 
             memory = torch.cuda.max_memory_allocated()
 
-            history_loader["epoch"].append(pbar.n)
+            history_loader["epoch"].append(epoch)
+            history_loader["n"].append(pbar.n)
             history_loader["memory"].append(memory)
 
             if SIGNAL_RECEIVED:
@@ -1308,7 +1298,7 @@ with tqdm(total=max_epoch, unit_scale=1, disable=args.distributed) as pbar:
         history_training["sum_loss"].append(sum_loss)
         history_training["max_memory_allocated"].append(memory)
 
-        if not epoch % mod_epoch or epoch == max_epoch - 1:
+        if not epoch % args.print_freq or epoch == args.epochs - 1:
 
             with torch.no_grad():
 
@@ -1372,7 +1362,7 @@ with tqdm(total=max_epoch, unit_scale=1, disable=args.distributed) as pbar:
                 # scheduler.step(sum_loss)
 
     # Create an empty file HALT_filename, mark the job as finished
-    if epoch == max_epoch - 1:
+    if epoch == args.epochs - 1:
         open(HALT_filename, 'a').close()
 
 
