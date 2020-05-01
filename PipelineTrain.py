@@ -21,6 +21,7 @@ import hashlib
 import itertools
 import math
 import os
+import pprint
 import pstats
 import re
 import shutil
@@ -217,7 +218,7 @@ if args.distributed:
 
 
 if not args.distributed or os.environ['SLURM_PROCID'] == '0':
-    print(args, flush=True)
+    print(pprint.pformat(vars(args)), flush=True)
 
 
 # In[ ]:
