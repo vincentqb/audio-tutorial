@@ -23,14 +23,17 @@ import math
 import os
 import pprint
 import pstats
+import random
 import re
 import shutil
 import signal
 import statistics
 import string
+from array import array
 from collections import defaultdict
 from datetime import datetime
 from io import StringIO
+from typing import Optional
 
 import matplotlib
 import torch
@@ -43,7 +46,7 @@ from torch.optim import SGD, Adadelta, Adam
 from torch.optim.lr_scheduler import ExponentialLR, ReduceLROnPlateau
 from torch.utils.data import DataLoader
 from torchaudio.datasets import LIBRISPEECH, SPEECHCOMMANDS
-from torchaudio.datasets.utils import diskcache_iterator
+from torchaudio.datasets.utils import bg_iterator, diskcache_iterator
 from torchaudio.transforms import MFCC, Resample
 from tqdm.notebook import tqdm as tqdm
 
@@ -918,9 +921,6 @@ def top_batch_viterbi_decode(tag_sequence: torch.Tensor):
 # In[ ]:
 
 
-from array import array
-
-
 def levenshtein_distance_array(r, h):
 
     # initialisation
@@ -971,7 +971,6 @@ def levenshtein_distance_list(r, h):
 
 
 # https://martin-thoma.com/word-error-rate-calculation/
-from typing import Optional
 
 
 def levenshtein_distance(r: str, h: str, device: Optional[str] = None):
@@ -1107,7 +1106,8 @@ loader_validation = DataLoader(
     validation, batch_size=batch_size, collate_fn=collate_fn, **data_loader_validation_params
 )
 
-print(len(loader_training), len(loader_validation), flush=True)
+print("Length of data loaders: ", len(loader_training),
+      len(loader_validation), flush=True)
 
 # num_features = next(iter(loader_training))[0].shape[1]
 # print(num_features, flush=True)
@@ -1124,10 +1124,10 @@ def forward_loss(inputs, targets, tensors_lengths, target_lengths):
     # keep batch first for data parallel
     outputs = model(inputs).transpose(0, 1)
 
-    this_batch_size = outputs.shape[1]
-    seq_len = outputs.shape[0]
+    # this_batch_size = outputs.shape[1]
+    # seq_len = outputs.shape[0]
     # input_lengths = torch.full((this_batch_size,), seq_len, dtype=torch.long, device=outputs.device)
-    input_lengths = tensors_lengths
+    # input_lengths = tensors_lengths
 
     # CTC
     # outputs: input length, batch size, number of classes (including blank)
@@ -1135,7 +1135,10 @@ def forward_loss(inputs, targets, tensors_lengths, target_lengths):
     # input_lengths: batch size
     # target_lengths: batch size
 
-    return criterion(outputs, targets, input_lengths, target_lengths)
+    return criterion(outputs, targets, tensors_lengths, target_lengths)
+
+
+inds = random.sample(range(args.batch_size), k=2)
 
 
 def forward_decode(inputs, targets, decoder):
@@ -1148,7 +1151,7 @@ def forward_decode(inputs, targets, decoder):
     target = decode(targets.tolist())
 
     print_length = 20
-    for i in range(20):
+    for i in inds:
         output_print = output[i].ljust(print_length)[:print_length]
         target_print = target[i].ljust(print_length)[:print_length]
         print(
@@ -1289,9 +1292,23 @@ with tqdm(total=args.epochs, unit_scale=1, disable=args.distributed) as pbar:
                 model.eval()
 
                 sum_loss = 0.
+                sum_out_greedy = [0, 0, 0, 0]
+                sum_out_viterbi = [0, 0, 0, 0]
+
                 for inputs, targets, tensors_lengths, target_lengths in loader_validation:
                     sum_loss += forward_loss(inputs, targets,
                                              tensors_lengths, target_lengths).item()
+
+                    if True:
+                        out_greedy = forward_decode(
+                            inputs, targets, greedy_decode)
+                        for i in range(len(out_greedy)):
+                            sum_out_greedy[i] += out_greedy[i]
+                    if args.viterbi_decoder:
+                        out_viterbi = forward_decode(
+                            inputs, targets, top_batch_viterbi_decode)
+                        for i in range(len(out_greedy)):
+                            sum_out_viterbi[i] += out_viterbi[i]
 
                     if SIGNAL_RECEIVED:
                         break
@@ -1301,14 +1318,16 @@ with tqdm(total=args.epochs, unit_scale=1, disable=args.distributed) as pbar:
                 sum_loss_str += f"   Validation: {sum_loss:.5f}"
                 print(sum_loss_str, flush=True)
 
-                print("greedy decoder", flush=True)
-                cer1, wer1, cern1, wern1 = forward_decode(
-                    inputs, targets, greedy_decode)
-
+                if True:
+                    for i in range(len(out_greedy)):
+                        sum_out_greedy[i] /= len(loader_validation)
+                    print(f"greedy decoder: {sum_out_greedy}", flush=True)
+                    cer1, wer1, cern1, wern1 = sum_out_greedy
                 if args.viterbi_decoder:
-                    print("viterbi decoder", flush=True)
-                    cer2, wer2, cern2, wern2 = forward_decode(
-                        inputs, targets, top_batch_viterbi_decode)
+                    for i in range(len(out_viterbi)):
+                        sum_out_viterbi[i] /= len(loader_validation)
+                    print(f"viterbi decoder: {sum_out_viterbi}", flush=True)
+                    cer2, wer2, cern2, wern2 = sum_out_viterbi
 
                 memory = torch.cuda.max_memory_allocated()
                 print(f"memory after validation: {memory}", flush=True)
@@ -1316,10 +1335,12 @@ with tqdm(total=args.epochs, unit_scale=1, disable=args.distributed) as pbar:
                 history_validation["epoch"].append(epoch)
                 history_validation["max_memory_allocated"].append(memory)
                 history_validation["sum_loss"].append(sum_loss)
-                history_validation["greedy_cer"].append(cer1)
-                history_validation["greedy_cer_normalized"].append(cern1)
-                history_validation["greedy_wer"].append(wer1)
-                history_validation["greedy_wer_normalized"].append(wern1)
+
+                if True:
+                    history_validation["greedy_cer"].append(cer1)
+                    history_validation["greedy_cer_normalized"].append(cern1)
+                    history_validation["greedy_wer"].append(wer1)
+                    history_validation["greedy_wer_normalized"].append(wern1)
                 if args.viterbi_decoder:
                     history_validation["viterbi_cer"].append(cer2)
                     history_validation["viterbi_cer_normalized"].append(cern2)
