@@ -15,7 +15,7 @@
 #SBATCH --array=1-4
 # number of CPUs = 2x (number of data workers + number of GPUs requested)
 
-COUNT=$((1 * 1 * 2 * 2))
+COUNT=$((1 * 1 * 2 * 1 * 2))
 
 if [[ "$SLURM_ARRAY_TASK_COUNT" -ne $COUNT ]]; then
     echo "SLURM_ARRAY_TASK_COUNT = $SLURM_ARRAY_TASK_COUNT is not equal to $COUNT"
@@ -25,7 +25,8 @@ fi
 archs=('wav2letter')
 bss=(128)
 lrs=(.5 .1)
-gammas=(.98 .99)
+gammas=(.98)
+nbinss=(13 128)
 
 i=$SLURM_ARRAY_TASK_ID
 
@@ -49,6 +50,11 @@ j=$(($i % $l))
 i=$(($i / $l))
 gamma=${gammas[$j]}
 
+l=${#nbinss[@]}
+j=$(($i % $l))
+i=$(($i / $l))
+nbins=${nbinss[$j]}
+
 echo $SLURM_JOB_ID $arch $bs $lr $gamma
 
 # The ENV below are only used in distributed training with env:// initialization
@@ -59,6 +65,6 @@ export MASTER_PORT=29500
 
 srun --label \
     python /private/home/vincentqb/experiment/PipelineTrain.py \
-	--arch $arch --batch-size $bs --learning-rate $lr --gamma $gamma\
+	--arch $arch --batch-size $bs --learning-rate $lr --gamma $gamma --n-bins $nbins \
 	--resume /private/home/vincentqb/experiment/checkpoint-$SLURM_JOB_ID-$arch-$bs-$lr.pth.tar
 	# --distributed --world-size $SLURM_JOB_NUM_NODES --dist-url 'env://' --dist-backend='nccl'
