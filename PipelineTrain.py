@@ -77,6 +77,8 @@ parser.add_argument('--workers', default=0, type=int,
                     metavar='N', help='number of data loading workers')
 parser.add_argument('--resume', default='', type=str,
                     metavar='PATH', help='path to latest checkpoint')
+parser.add_argument('--figures', default='', type=str,
+                    metavar='PATH', help='folder path to save figures')
 
 parser.add_argument('--epochs', default=200, type=int,
                     metavar='N', help='number of total epochs to run')
@@ -89,6 +91,7 @@ parser.add_argument('--arch', metavar='ARCH', default='wav2letter',
                     choices=["wav2letter", "lstm"], help='model architecture')
 parser.add_argument('--batch-size', default=64, type=int,
                     metavar='N', help='mini-batch size')
+
 parser.add_argument('--learning-rate', default=1., type=float,
                     metavar='LR', help='initial learning rate')
 parser.add_argument('--gamma', default=.96, type=float,
@@ -119,6 +122,19 @@ if in_notebook:
     args, _ = parser.parse_known_args()
 else:
     args = parser.parse_args()
+
+
+# In[ ]:
+
+
+if args.learning_rate < 0.:
+    args.learning_rate = 10 ** random.uniform(-3, 1)
+
+if args.weight_decay < 0.:
+    args.weight_decay = 10 ** random.uniform(-6, 0)
+
+if args.gamma < 0.:
+    args.gamma = random.uniform(.95, 1.)
 
 
 # # Checkpoint
@@ -1079,6 +1095,23 @@ if not args.distributed or os.environ['SLURM_PROCID'] == '0':
     # Each float32 is 4 bytes.
     print(f"Approximate space taken: {n * 4 / (10 ** 6):.1f} MB", flush=True)
 
+if False:
+    print("Total memory: ", torch.cuda.get_device_properties(
+        0).total_memory / 10**6)  # Convert to MB
+
+    t = torch.cuda.get_device_properties(0).total_memory
+    c = torch.cuda.memory_cached(0)
+    a = torch.cuda.memory_allocated(0)
+    f = c-a  # free inside cache
+
+    print("Free memory inside cache: ", f)
+
+
+# In[ ]:
+
+
+print(torch.cuda.memory_summary(), flush=True)
+
 
 # In[ ]:
 
@@ -1223,7 +1256,7 @@ with tqdm(total=args.epochs, unit_scale=1, disable=args.distributed) as pbar:
 
         sum_loss = 0.
         total_norm = 0.
-        for inputs, targets, tensors_lengths, target_lengths in loader_training:
+        for inputs, targets, tensors_lengths, target_lengths in bg_iterator(loader_training, maxsize=2):
 
             loss = forward_loss(
                 inputs, targets, tensors_lengths, target_lengths)
@@ -1295,7 +1328,7 @@ with tqdm(total=args.epochs, unit_scale=1, disable=args.distributed) as pbar:
                 sum_out_greedy = [0, 0, 0, 0]
                 sum_out_viterbi = [0, 0, 0, 0]
 
-                for inputs, targets, tensors_lengths, target_lengths in loader_validation:
+                for inputs, targets, tensors_lengths, target_lengths in bg_iterator(loader_validation, maxsize=2):
                     sum_loss += forward_loss(inputs, targets,
                                              tensors_lengths, target_lengths).item()
 
@@ -1400,76 +1433,95 @@ history_validation["epoch"]
 # In[ ]:
 
 
-if "greedy_cer" in history_validation:
-    plt.plot(history_validation["epoch"],
-             history_validation["greedy_cer"], label="greedy")
-if "viterbi_cer" in history_validation:
-    plt.plot(history_validation["epoch"],
-             history_validation["viterbi_cer"], label="viterbi")
-plt.legend()
+if not args.distributed or os.environ['SLURM_PROCID'] == '0':
+
+    if "greedy_cer" in history_validation:
+        plt.plot(history_validation["epoch"],
+                 history_validation["greedy_cer"], label="greedy")
+    if "viterbi_cer" in history_validation:
+        plt.plot(history_validation["epoch"],
+                 history_validation["viterbi_cer"], label="viterbi")
+    plt.legend()
+    plt.savefig(os.path.join(args.figures, "cer.png")
 
 
 # In[ ]:
 
 
-if "greedy_wer" in history_validation:
-    plt.plot(history_validation["epoch"],
-             history_validation["greedy_wer"], label="greedy")
-if "viterbi_wer" in history_validation:
-    plt.plot(history_validation["epoch"],
-             history_validation["viterbi_wer"], label="viterbi")
-plt.legend()
+if not args.distributed or os.environ['SLURM_PROCID'] == '0':
+
+    if "greedy_wer" in history_validation:
+        plt.plot(history_validation["epoch"],
+                 history_validation["greedy_wer"], label="greedy")
+    if "viterbi_wer" in history_validation:
+        plt.plot(history_validation["epoch"],
+                 history_validation["viterbi_wer"], label="viterbi")
+    plt.legend()
+    plt.savefig(os.path.join(args.figures, "wer.png")
 
 
 # In[ ]:
 
 
-if "greedy_cer_normalized" in history_validation:
-    plt.plot(history_validation["epoch"],
-             history_validation["greedy_cer_normalized"], label="greedy")
-if "viterbi_cer_normalized" in history_validation:
-    plt.plot(history_validation["epoch"],
-             history_validation["viterbi_cer_normalized"], label="viterbi")
-plt.legend()
+if not args.distributed or os.environ['SLURM_PROCID'] == '0':
+
+    if "greedy_cer_normalized" in history_validation:
+        plt.plot(history_validation["epoch"],
+                 history_validation["greedy_cer_normalized"], label="greedy")
+    if "viterbi_cer_normalized" in history_validation:
+        plt.plot(history_validation["epoch"],
+                 history_validation["viterbi_cer_normalized"], label="viterbi")
+    plt.legend()
+    plt.savefig(os.path.join(args.figures, "cer_normalized.png")
 
 
 # In[ ]:
 
 
-if "greedy_wer_normalized" in history_validation:
+if not args.distributed or os.environ['SLURM_PROCID'] == '0':
+
+    if "greedy_wer_normalized" in history_validation:
+        plt.plot(history_validation["epoch"],
+                 history_validation["greedy_wer_normalized"], label="greedy")
+    if "viterbi_wer_normalized" in history_validation:
+        plt.plot(history_validation["epoch"],
+                 history_validation["viterbi_wer_normalized"], label="viterbi")
+    plt.legend()
+    plt.savefig(os.path.join(args.figures, "wer_normalized.png")
+
+
+# In[ ]:
+
+
+if not args.distributed or os.environ['SLURM_PROCID'] == '0':
+
+    plt.plot(history_training["epoch"],
+             history_training["sum_loss"], label="training")
     plt.plot(history_validation["epoch"],
-             history_validation["greedy_wer_normalized"], label="greedy")
-if "viterbi_wer_normalized" in history_validation:
+             history_validation["sum_loss"], label="validation")
+    plt.legend()
+    plt.savefig(os.path.join(args.figures, "sum_loss.png")
+
+
+# In[ ]:
+
+
+if not args.distributed or os.environ['SLURM_PROCID'] == '0':
+
+    plt.plot(history_training["epoch"],
+             history_training["sum_loss"], label="training")
     plt.plot(history_validation["epoch"],
-             history_validation["viterbi_wer_normalized"], label="viterbi")
-plt.legend()
+             history_validation["sum_loss"], label="validation")
+    plt.yscale("log")
+    plt.legend()
+    plt.savefig(os.path.join(args.figures, "log_sum_loss.png")
 
 
 # In[ ]:
 
 
-plt.plot(history_training["epoch"],
-         history_training["sum_loss"], label="training")
-plt.plot(history_validation["epoch"],
-         history_validation["sum_loss"], label="validation")
-plt.legend()
-
-
-# In[ ]:
-
-
-plt.plot(history_training["epoch"],
-         history_training["sum_loss"], label="training")
-plt.plot(history_validation["epoch"],
-         history_validation["sum_loss"], label="validation")
-plt.yscale("log")
-plt.legend()
-
-
-# In[ ]:
-
-
-print(torch.cuda.memory_summary(), flush=True)
+if not args.distributed or os.environ['SLURM_PROCID'] == '0':
+    print(torch.cuda.memory_summary(), flush=True)
 
 
 # In[ ]:
